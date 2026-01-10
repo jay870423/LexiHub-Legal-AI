@@ -1,0 +1,5 @@
+{
+  "name": "LexiHub - Legal AI Core",
+  "description": "A vertical AI knowledge hub integrating data collection, structured analysis, and RAG-based legal assistance.",
+  "requestFramePermissions": []
+}
