@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Bot, Cpu, Check, AlertCircle, Globe, Server } from 'lucide-react';
+import { Key, Bot, Cpu, Check, AlertCircle, Globe, Server, Eye, EyeOff, Trash2, Save } from 'lucide-react';
 import { AIProvider } from '../types';
 import { setGlobalProvider, setGlobalDeepSeekKey, setGlobalDeepSeekBaseUrl } from '../services/geminiService';
 
@@ -11,6 +11,7 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => {
   const [deepSeekKey, setDeepSeekKey] = useState('');
   const [deepSeekBaseUrl, setDeepSeekBaseUrl] = useState('');
+  const [showKey, setShowKey] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   // Load existing configuration on mount
@@ -24,16 +25,34 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
   const handleSave = () => {
     setSaveStatus('saving');
     
-    // Update Service
+    // Update Service & LocalStorage
+    // Provider is already updated on click, but we reinforce it here
     setGlobalProvider(currentProvider);
     setGlobalDeepSeekKey(deepSeekKey);
     setGlobalDeepSeekBaseUrl(deepSeekBaseUrl);
     
-    // Simulate save delay
+    // Simulate save delay for better UX
     setTimeout(() => {
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }, 600);
+  };
+
+  const handleProviderSwitch = (provider: AIProvider) => {
+    setProvider(provider);
+    setGlobalProvider(provider); // Auto-save provider choice to LocalStorage
+  };
+
+  const handleClearData = () => {
+    if (window.confirm('Are you sure you want to clear all locally stored settings? This will reset the provider and remove the API key.')) {
+      localStorage.removeItem('deepseek_api_key');
+      localStorage.removeItem('deepseek_base_url');
+      localStorage.removeItem('ai_provider');
+      setDeepSeekKey('');
+      setDeepSeekBaseUrl('https://api.deepseek.com');
+      handleProviderSwitch('gemini');
+      alert('Settings cleared from browser storage.');
+    }
   };
 
   const useVercelProxy = () => {
@@ -66,7 +85,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Google Gemini Option */}
             <div 
-              onClick={() => { setProvider('gemini'); }}
+              onClick={() => handleProviderSwitch('gemini')}
               className={`relative cursor-pointer rounded-xl border-2 p-4 transition-all ${
                 currentProvider === 'gemini' 
                   ? 'border-blue-600 bg-blue-50/50' 
@@ -90,7 +109,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
 
             {/* DeepSeek Option */}
             <div 
-              onClick={() => { setProvider('deepseek'); }}
+              onClick={() => handleProviderSwitch('deepseek')}
               className={`relative cursor-pointer rounded-xl border-2 p-4 transition-all ${
                 currentProvider === 'deepseek' 
                   ? 'border-indigo-600 bg-indigo-50/50' 
@@ -108,7 +127,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                 Uses <strong>DeepSeek-V3</strong> (via API). Excellent at coding, logic, and deep reasoning tasks.
               </p>
               <div className="mt-3 text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 inline-block text-slate-400">
-                Key: Custom
+                Key: LocalStorage
               </div>
             </div>
           </div>
@@ -122,15 +141,22 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                   <div className="relative">
                     <Key size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input 
-                      type="password" 
+                      type={showKey ? "text" : "password"} 
                       value={deepSeekKey}
                       onChange={(e) => setDeepSeekKey(e.target.value)}
                       placeholder="sk-..."
-                      className="w-full pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                      className="w-full pl-9 pr-10 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
                     />
+                    <button 
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
-                  <p className="text-xs text-slate-400 mt-2">
-                    Key is stored locally in your browser. Get one at platform.deepseek.com.
+                  <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                    <Check size={12} className="text-green-500" />
+                    Stored securely in your browser's LocalStorage. Never sent to our servers.
                   </p>
                 </div>
                 
@@ -144,7 +170,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                         value={deepSeekBaseUrl}
                         onChange={(e) => setDeepSeekBaseUrl(e.target.value)}
                         placeholder="https://api.deepseek.com"
-                        className="w-full pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-600"
+                        className="w-full pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-600 transition-shadow"
                       />
                     </div>
                     <button 
@@ -169,12 +195,26 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
           </div>
 
           {/* Action Buttons */}
-          <div className="mt-6 flex justify-end">
+          <div className="mt-8 flex justify-between items-center pt-4 border-t border-gray-100">
+            <button 
+              onClick={handleClearData}
+              className="text-red-500 text-sm hover:text-red-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={16} /> Clear Local Data
+            </button>
+
             <button 
               onClick={handleSave}
-              className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+              disabled={saveStatus === 'saving'}
+              className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {saveStatus === 'saving' ? 'Applying...' : 'Save Configuration'}
+              {saveStatus === 'saving' ? (
+                <>Saving...</>
+              ) : (
+                <>
+                  <Save size={18} /> Save Configuration
+                </>
+              )}
             </button>
           </div>
         </div>
