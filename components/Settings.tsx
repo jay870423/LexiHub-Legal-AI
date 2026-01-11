@@ -45,12 +45,22 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
 
   const handleClearData = () => {
     if (window.confirm('Are you sure you want to clear all locally stored settings? This will reset the provider and remove the API key.')) {
+      // 1. Clear Global State (Memory) immediately
+      setGlobalDeepSeekKey('');
+      setGlobalDeepSeekBaseUrl('https://api.deepseek.com');
+      
+      // 2. Clear LocalStorage strictly
       localStorage.removeItem('deepseek_api_key');
       localStorage.removeItem('deepseek_base_url');
       localStorage.removeItem('ai_provider');
+
+      // 3. Reset Component State
       setDeepSeekKey('');
       setDeepSeekBaseUrl('https://api.deepseek.com');
+      
+      // 4. Switch Provider back to default (Gemini)
       handleProviderSwitch('gemini');
+      
       alert('Settings cleared from browser storage.');
     }
   };
