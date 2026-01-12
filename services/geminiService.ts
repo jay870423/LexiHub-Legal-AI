@@ -47,36 +47,57 @@ export const getGlobalProvider = () => currentProvider;
 const callSerpApi = async (query: string): Promise<any> => {
   if (!serpApiKey) throw new Error("SerpApi Key is missing");
 
-  // Use local proxy if available (Vite/Vercel) to avoid CORS
-  const baseUrl = '/api/proxy/serpapi'; 
-  // Fallback to direct URL if we are confident (but usually fails CORS in browser) 
-  // or use a public CORS proxy as a last resort backup if local proxy 404s
-  
   const params = new URLSearchParams({
     engine: "google",
     q: query,
     api_key: serpApiKey,
     google_domain: "google.com",
-    hl: "en", // language
-    gl: "us", // country - can be dynamic but defaulting to US for broad access
+    hl: "en",
+    gl: "us",
     num: "10"
   });
 
+  const targetUrl = `https://serpapi.com/search.json?${params.toString()}`;
+
+  // 1. Try Local Proxy (Vite/Vercel)
+  // This bypasses CORS by routing through the backend/dev server
   try {
-    const response = await fetch(`${baseUrl}/search.json?${params.toString()}`);
-    if (!response.ok) {
-       // Try direct fetch if proxy fails (e.g. not running on Vercel/Vite correctly)
-       const directUrl = `https://serpapi.com/search.json?${params.toString()}`;
-       const directResponse = await fetch(directUrl);
-       if (!directResponse.ok) {
-         const err = await directResponse.json();
-         throw new Error(`SerpApi Error: ${err.error || directResponse.statusText}`);
-       }
-       return await directResponse.json();
+    const proxyUrl = `/api/proxy/serpapi/search.json?${params.toString()}`;
+    const response = await fetch(proxyUrl);
+    
+    if (response.ok) {
+      return await response.json();
     }
+    console.warn(`Local proxy fetch failed (${response.status}), switching to public CORS proxy...`);
+  } catch (e) {
+    console.warn("Local proxy network error, switching to public CORS proxy...", e);
+  }
+
+  // 2. Fallback: Public CORS Proxy (corsproxy.io)
+  // This is a reliable fallback for client-side only environments (or when local proxy fails)
+  try {
+    const corsUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+    const response = await fetch(corsUrl);
+    
+    if (!response.ok) {
+      // Try to parse detailed error from SerpApi if possible
+      const errText = await response.text();
+      let errorMessage = response.statusText;
+      try {
+        const jsonErr = JSON.parse(errText);
+        if (jsonErr.error) errorMessage = jsonErr.error;
+      } catch {}
+      
+      throw new Error(`SerpApi Error (${response.status}): ${errorMessage}`);
+    }
+    
     return await response.json();
   } catch (error) {
-    console.error("SerpApi Fetch Error:", error);
+    console.error("SerpApi Fetch Error (Final):", error);
+    
+    if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
+       throw new Error("Network Error: Could not connect to SerpApi. This is likely a CORS issue or network block.");
+    }
     throw error;
   }
 };
