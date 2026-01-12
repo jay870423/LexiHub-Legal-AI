@@ -5,6 +5,10 @@
       "destination": "https://api.deepseek.com/:match*"
     },
     {
+      "source": "/api/proxy/serpapi/:match*",
+      "destination": "https://serpapi.com/:match*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

@@ -8,6 +8,7 @@ const DEEPSEEK_MODEL_NAME = "deepseek-chat";
 // State to track current provider and keys
 let currentProvider: AIProvider = (localStorage.getItem('ai_provider') as AIProvider) || 'gemini';
 let deepSeekApiKey: string = localStorage.getItem('deepseek_api_key') || '';
+let serpApiKey: string = localStorage.getItem('serp_api_key') || '';
 
 // Clean the stored URL on init to prevent "undefined" string or double slashes
 const storedBaseUrl = localStorage.getItem('deepseek_base_url');
@@ -35,7 +36,50 @@ export const setGlobalDeepSeekBaseUrl = (url: string) => {
   localStorage.setItem('deepseek_base_url', cleanUrl);
 };
 
+export const setGlobalSerpApiKey = (key: string) => {
+  serpApiKey = key;
+  localStorage.setItem('serp_api_key', key);
+};
+
 export const getGlobalProvider = () => currentProvider;
+
+// --- Helper: SerpApi Fetcher ---
+const callSerpApi = async (query: string): Promise<any> => {
+  if (!serpApiKey) throw new Error("SerpApi Key is missing");
+
+  // Use local proxy if available (Vite/Vercel) to avoid CORS
+  const baseUrl = '/api/proxy/serpapi'; 
+  // Fallback to direct URL if we are confident (but usually fails CORS in browser) 
+  // or use a public CORS proxy as a last resort backup if local proxy 404s
+  
+  const params = new URLSearchParams({
+    engine: "google",
+    q: query,
+    api_key: serpApiKey,
+    google_domain: "google.com",
+    hl: "en", // language
+    gl: "us", // country - can be dynamic but defaulting to US for broad access
+    num: "10"
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/search.json?${params.toString()}`);
+    if (!response.ok) {
+       // Try direct fetch if proxy fails (e.g. not running on Vercel/Vite correctly)
+       const directUrl = `https://serpapi.com/search.json?${params.toString()}`;
+       const directResponse = await fetch(directUrl);
+       if (!directResponse.ok) {
+         const err = await directResponse.json();
+         throw new Error(`SerpApi Error: ${err.error || directResponse.statusText}`);
+       }
+       return await directResponse.json();
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("SerpApi Fetch Error:", error);
+    throw error;
+  }
+};
 
 // --- Helper: DeepSeek Fetcher (Non-Streaming) ---
 const callDeepSeek = async (messages: any[], jsonMode: boolean = false) => {
@@ -297,8 +341,6 @@ export const crawlUrl = async (url: string): Promise<Article> => {
   ${htmlContent.substring(0, 30000)}`;
 
   try {
-     // Use Gemini for extraction (even if DeepSeek is selected, Gemini Flash is better/faster for large context extraction usually, or stick to provider)
-     // We stick to Gemini Flash for extraction specifically because of 1M context window which is great for HTML.
      const response = await googleAi.models.generateContent({
       model: GEMINI_MODEL_NAME,
       contents: prompt,
@@ -343,7 +385,6 @@ export const crawlUrl = async (url: string): Promise<Article> => {
 // Step 1: Extract Intent
 export const extractAgentIntent = async (query: string): Promise<AgentIntent> => {
   if (!process.env.API_KEY) {
-    // If API KEY is missing, return a dummy intent so the flow fails gracefully later or shows error
     return { event: "Error: API Key Missing", location: "Check Settings", contactPerson: "-", phone: "-" };
   }
 
@@ -369,7 +410,6 @@ export const extractAgentIntent = async (query: string): Promise<AgentIntent> =>
     required: ["event", "location", "contactPerson", "phone"]
   };
 
-  // We use Gemini for this structured task
   try {
     const response = await googleAi.models.generateContent({
       model: GEMINI_MODEL_NAME,
@@ -383,29 +423,91 @@ export const extractAgentIntent = async (query: string): Promise<AgentIntent> =>
     if (response.text) return JSON.parse(response.text);
     throw new Error("No intent extracted");
   } catch (error) {
-    // Fallback if error
     return { event: query, location: "Unknown", contactPerson: "-", phone: "-" };
   }
 };
 
-// Step 2: Search with Grounding
-export const searchWithGrounding = async (query: string): Promise<{ text: string, links: SearchResult[] }> => {
+// Step 2: Search with Grounding (Supports SerpApi & Gemini)
+export const searchWithGrounding = async (query: string): Promise<{ text: string, links: SearchResult[], error?: boolean }> => {
+  
+  // STRATEGY 1: SerpApi (Priority if Key exists)
+  if (serpApiKey) {
+    console.log("Searching with SerpApi...");
+    try {
+      const data = await callSerpApi(query);
+      
+      const links: SearchResult[] = [];
+      let textContent = `[SERP-API RESULTS] Query: ${query}\n\n`;
+
+      // 1. Process Local Results (Map Pack) - Highest Value for Leads
+      if (data.local_results && data.local_results.length > 0) {
+        textContent += `--- LOCAL BUSINESSES (HIGH PRIORITY) ---\n`;
+        data.local_results.forEach((place: any, idx: number) => {
+          textContent += `${idx + 1}. NAME: ${place.title}\n`;
+          if (place.phone) textContent += `   PHONE: ${place.phone}\n`;
+          if (place.address) textContent += `   ADDRESS: ${place.address}\n`;
+          if (place.website) {
+             textContent += `   WEBSITE: ${place.website}\n`;
+             links.push({ title: `${place.title} (Map)`, url: place.website });
+          }
+          if (place.rating) textContent += `   RATING: ${place.rating} (${place.reviews} reviews)\n`;
+          textContent += `\n`;
+        });
+      }
+
+      // 2. Process Organic Results
+      if (data.organic_results && data.organic_results.length > 0) {
+         textContent += `--- WEB RESULTS ---\n`;
+         data.organic_results.forEach((res: any) => {
+           textContent += `TITLE: ${res.title}\nLINK: ${res.link}\nSNIPPET: ${res.snippet}\n\n`;
+           links.push({ title: res.title, url: res.link });
+         });
+      }
+
+      // 3. Process Knowledge Graph (e.g. specific entity info)
+      if (data.knowledge_graph) {
+        textContent += `--- KNOWLEDGE GRAPH ---\n`;
+        textContent += `TITLE: ${data.knowledge_graph.title}\n`;
+        if (data.knowledge_graph.description) textContent += `DESC: ${data.knowledge_graph.description}\n`;
+        // Sometimes phone numbers appear here for firms
+        // SerpApi structure varies, usually in a list or attributes
+      }
+
+      if (links.length === 0 && !textContent.includes("NAME:")) {
+        return { text: "SerpApi returned no relevant results.", links: [], error: true };
+      }
+
+      return { text: textContent, links };
+
+    } catch (e: any) {
+      console.warn("SerpApi Failed:", e);
+      // If SerpApi fails, we can either error out or fall back to Gemini. 
+      // Given the user specifically switched to SerpApi, we should probably report the error clearly
+      // but if the user has NO api key for Gemini Grounding (free tier limit), this is the end of the line.
+      return { 
+        text: `SerpApi Error: ${e.message}. Please check your API Key in Settings.`, 
+        links: [], 
+        error: true 
+      };
+    }
+  }
+
+  // STRATEGY 2: Google Gemini Native Search (Fallback / Default)
   if (!process.env.API_KEY) {
     return { 
-      text: "Configuration Error: API_KEY is missing. Please add 'API_KEY' to your Vercel Environment Variables.", 
-      links: [] 
+      text: "Configuration Error: API_KEY is missing.", 
+      links: [],
+      error: true
     };
   }
 
   try {
-    // Note: googleSearch tool is only available for Gemini models
     if (currentProvider !== 'gemini') {
-      // Fallback or force switch (for this demo we assume Gemini for search agent)
       console.warn("Switching to Gemini for Search Tool capability");
     }
     
     const response = await googleAi.models.generateContent({
-      model: GEMINI_MODEL_NAME, // Must use gemini-3-flash-preview or pro for tools
+      model: GEMINI_MODEL_NAME, 
       contents: `Find detailed information about: ${query}. 
       List specific law firms, lawyers, their contact details (phone, address) and websites.
       Provide as much concrete detail as possible.`,
@@ -414,7 +516,10 @@ export const searchWithGrounding = async (query: string): Promise<{ text: string
       }
     });
 
-    const text = response.text || "No results found.";
+    const text = response.text;
+    if (!text) {
+      throw new Error("Empty response from Search tool (Safety or Quota).");
+    }
     
     // Extract grounding chunks
     const links: SearchResult[] = [];
@@ -430,12 +535,32 @@ export const searchWithGrounding = async (query: string): Promise<{ text: string
     });
 
     return { text, links };
+
   } catch (error: any) {
-    console.error("Search failed:", error);
-    return { 
-      text: `Search API Error: ${error.message || 'Unknown error'}. Please check your API Key and billing status.`, 
-      links: [] 
-    };
+    console.warn("Primary Gemini Search Failed (Likely Quota), attempting fallback...", error);
+    
+    try {
+      const fallbackResponse = await googleAi.models.generateContent({
+         model: GEMINI_MODEL_NAME,
+         contents: `User asked: ${query}. 
+         The search tool failed due to quota limits. 
+         Please provide a general helpful response about how to find such lawyers in that location.
+         Start your response with: "[SEARCH QUOTA EXCEEDED] Falling back to general knowledge: "`
+      });
+      
+      return { 
+        text: fallbackResponse.text || "No results available.", 
+        links: [],
+        error: true
+      };
+
+    } catch (fallbackError: any) {
+       return { 
+        text: `Search Critical Failure: ${error.message || 'Unknown error'}.`, 
+        links: [],
+        error: true
+      };
+    }
   }
 };
 
@@ -482,8 +607,7 @@ export const structureLeads = async (rawText: string): Promise<AgentLead[]> => {
 
 // Step 3 (Streaming): Structure Leads with stream
 export async function* structureLeadsStream(rawText: string) {
-  // If the raw text indicates an error, don't try to parse leads
-  if (rawText.startsWith("Configuration Error") || rawText.startsWith("Search API Error")) {
+  if (rawText.startsWith("Configuration Error") || rawText.includes("Critical Failure")) {
     return;
   }
 

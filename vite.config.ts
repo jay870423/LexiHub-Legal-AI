@@ -12,5 +12,19 @@ export default defineConfig(({ mode }) => {
       // Priority: 1. Loaded from .env (local) 2. process.env (Vercel system env)
       'process.env.API_KEY': JSON.stringify(env.API_KEY || process.env.API_KEY),
     },
+    server: {
+      proxy: {
+        '/api/proxy/serpapi': {
+          target: 'https://serpapi.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/proxy\/serpapi/, ''),
+        },
+        '/api/proxy/deepseek': {
+          target: 'https://api.deepseek.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/proxy\/deepseek/, ''),
+        },
+      },
+    },
   };
 });

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Bot, Cpu, Check, AlertCircle, Globe, Server, Eye, EyeOff, Trash2, Save } from 'lucide-react';
+import { Key, Bot, Cpu, Check, AlertCircle, Globe, Server, Eye, EyeOff, Trash2, Save, Search } from 'lucide-react';
 import { AIProvider } from '../types';
-import { setGlobalProvider, setGlobalDeepSeekKey, setGlobalDeepSeekBaseUrl } from '../services/geminiService';
+import { setGlobalProvider, setGlobalDeepSeekKey, setGlobalDeepSeekBaseUrl, setGlobalSerpApiKey } from '../services/geminiService';
 
 interface SettingsProps {
   currentProvider: AIProvider;
@@ -11,6 +11,7 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => {
   const [deepSeekKey, setDeepSeekKey] = useState('');
   const [deepSeekBaseUrl, setDeepSeekBaseUrl] = useState('');
+  const [serpApiKey, setSerpApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
@@ -18,7 +19,9 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
   useEffect(() => {
     const storedKey = localStorage.getItem('deepseek_api_key');
     const storedUrl = localStorage.getItem('deepseek_base_url');
+    const storedSerpKey = localStorage.getItem('serp_api_key');
     if (storedKey) setDeepSeekKey(storedKey);
+    if (storedSerpKey) setSerpApiKey(storedSerpKey);
     setDeepSeekBaseUrl(storedUrl || 'https://api.deepseek.com');
   }, []);
 
@@ -26,10 +29,10 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
     setSaveStatus('saving');
     
     // Update Service & LocalStorage
-    // Provider is already updated on click, but we reinforce it here
     setGlobalProvider(currentProvider);
     setGlobalDeepSeekKey(deepSeekKey);
     setGlobalDeepSeekBaseUrl(deepSeekBaseUrl);
+    setGlobalSerpApiKey(serpApiKey);
     
     // Simulate save delay for better UX
     setTimeout(() => {
@@ -44,19 +47,22 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
   };
 
   const handleClearData = () => {
-    if (window.confirm('Are you sure you want to clear all locally stored settings? This will reset the provider and remove the API key.')) {
+    if (window.confirm('Are you sure you want to clear all locally stored settings? This will reset the provider and remove the API keys.')) {
       // 1. Clear Global State (Memory) immediately
       setGlobalDeepSeekKey('');
       setGlobalDeepSeekBaseUrl('https://api.deepseek.com');
+      setGlobalSerpApiKey('');
       
       // 2. Clear LocalStorage strictly
       localStorage.removeItem('deepseek_api_key');
       localStorage.removeItem('deepseek_base_url');
+      localStorage.removeItem('serp_api_key');
       localStorage.removeItem('ai_provider');
 
       // 3. Reset Component State
       setDeepSeekKey('');
       setDeepSeekBaseUrl('https://api.deepseek.com');
+      setSerpApiKey('');
       
       // 4. Switch Provider back to default (Gemini)
       handleProviderSwitch('gemini');
@@ -72,7 +78,48 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       
-      {/* AI Model Selection Card */}
+      {/* 1. Search Provider (SerpApi) */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+             <div className="bg-orange-100 p-2 rounded-lg text-orange-600">
+               <Search size={20} />
+             </div>
+             <div>
+               <h2 className="text-lg font-bold text-slate-800">Search Configuration</h2>
+               <p className="text-xs text-slate-500">Manage how LexiHub finds legal information on the web</p>
+             </div>
+          </div>
+        </div>
+        
+        <div className="p-6 space-y-4">
+           <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">SerpApi Key (Optional)</label>
+              <div className="relative">
+                <Key size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input 
+                  type={showKey ? "text" : "password"} 
+                  value={serpApiKey}
+                  onChange={(e) => setSerpApiKey(e.target.value)}
+                  placeholder="Enter your SerpApi Key..."
+                  className="w-full pl-9 pr-10 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-shadow"
+                />
+                <button 
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                 Recommended for high-volume searching. If provided, the system will use SerpApi instead of Gemini's internal search tool. 
+                 Includes <strong>Local Map Results</strong> for better lead generation.
+              </p>
+           </div>
+        </div>
+      </div>
+
+      {/* 2. AI Model Selection */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -80,8 +127,8 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                <Cpu size={20} />
              </div>
              <div>
-               <h2 className="text-lg font-bold text-slate-800">AI Model Provider</h2>
-               <p className="text-xs text-slate-500">Select the underlying inference engine for LexiHub</p>
+               <h2 className="text-lg font-bold text-slate-800">AI Inference Engine</h2>
+               <p className="text-xs text-slate-500">Select the underlying LLM for processing and reasoning</p>
              </div>
           </div>
           {saveStatus === 'saved' && (

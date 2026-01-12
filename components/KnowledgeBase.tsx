@@ -7,7 +7,7 @@ import {
 } from '../services/geminiService';
 import { 
   Zap, Loader2, CheckCircle2, Download,
-  ArrowRight, Check, Sparkles, Phone, AlertTriangle, FileText
+  ArrowRight, Check, Sparkles, Phone, AlertTriangle, FileText, XCircle
 } from 'lucide-react';
 
 interface KnowledgeBaseProps {
@@ -17,7 +17,7 @@ interface KnowledgeBaseProps {
 const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
   // --- LEAD DISCOVERY STATE ---
   const [searchQuery, setSearchQuery] = useState('');
-  const [agentStatus, setAgentStatus] = useState<'idle' | 'identifying' | 'searching' | 'processing' | 'complete'>('idle');
+  const [agentStatus, setAgentStatus] = useState<'idle' | 'identifying' | 'searching' | 'processing' | 'complete' | 'error'>('idle');
   const [intentData, setIntentData] = useState<AgentIntent | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchSummary, setSearchSummary] = useState<string>("");
@@ -93,6 +93,18 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
       const searchRes = await searchWithGrounding(`${intent.event} lawyer in ${intent.location} ${intent.contactPerson !== '-' ? intent.contactPerson : ''}`);
       setSearchResults(searchRes.links);
       setSearchSummary(searchRes.text);
+
+      // Check if search returned an explicit error flag
+      if (searchRes.error) {
+        setAgentStatus('error');
+        if (timerRef.current) clearInterval(timerRef.current);
+        // Even on error, we might have fallback text to process, but usually leads are empty
+        // We stop here for clarity or process fallback text if needed.
+        // If it's a fallback text, we might want to try to extract *something* or just show the text.
+        // Let's stop the automatic extraction if it's a quota error to avoid confusing "No leads" message
+        return; 
+      }
+
       setAgentStatus('processing');
 
       // Step 3: LLM Structure (Streaming)
@@ -142,9 +154,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
 
     } catch (e) {
       console.error(e);
-      // Don't alert here, let the status update handle it visually if possible, or simple alert
-      // alert("Agent failed during process. Please try again."); 
-      setAgentStatus('complete'); // Force complete to show what we have (error text)
+      setAgentStatus('error'); 
     } finally {
       if (timerRef.current) clearInterval(timerRef.current);
     }
@@ -172,10 +182,10 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                  />
                  <button 
                    onClick={handleAgentSearch}
-                   disabled={agentStatus !== 'idle' && agentStatus !== 'complete'}
+                   disabled={agentStatus !== 'idle' && agentStatus !== 'complete' && agentStatus !== 'error'}
                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 md:px-8 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:shadow-none w-full md:w-auto min-w-[160px]"
                  >
-                   {agentStatus !== 'idle' && agentStatus !== 'complete' ? <Loader2 className="animate-spin" size={24} /> : <Zap size={24} />}
+                   {agentStatus !== 'idle' && agentStatus !== 'complete' && agentStatus !== 'error' ? <Loader2 className="animate-spin" size={24} /> : <Zap size={24} />}
                    <span>Find Leads</span>
                  </button>
               </div>
@@ -186,7 +196,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 animate-in slide-in-from-bottom-2">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="font-bold text-slate-800 text-lg">Workflow Status</h3>
-                  {agentStatus === 'complete' && <span className="text-xs text-slate-400 font-mono">Total Time: {processingTime}s</span>}
+                  {(agentStatus === 'complete' || agentStatus === 'error') && <span className="text-xs text-slate-400 font-mono">Total Time: {processingTime}s</span>}
                 </div>
 
                 {/* Steps */}
@@ -198,22 +208,27 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                   ].map((step, idx) => {
                     // Logic: If current status index >= step index, it's done or active.
                     const statuses = ['idle', 'identifying', 'searching', 'processing', 'complete'];
-                    const currentIdx = statuses.indexOf(agentStatus);
+                    // Special handling for error: Error typically implies search failed, so processing never happened
+                    const isError = agentStatus === 'error' && step.id === 'searching';
+                    
+                    const currentIdx = statuses.indexOf(agentStatus === 'error' ? 'searching' : agentStatus);
                     const stepIdx = statuses.indexOf(step.id);
-                    const isDone = currentIdx > stepIdx;
-                    const isActive = currentIdx === stepIdx;
+                    const isDone = currentIdx > stepIdx && !isError;
+                    const isActive = currentIdx === stepIdx && !isError;
 
                     return (
                       <div key={step.id} className="flex items-center gap-1 md:gap-2">
                         <div className={`px-2 md:px-3 py-1.5 rounded-full flex items-center gap-1.5 border text-xs md:text-sm whitespace-nowrap ${
-                          isDone 
-                            ? 'bg-green-50 border-green-200 text-green-700' 
-                            : isActive 
-                              ? 'bg-blue-50 border-blue-200 text-blue-700 animate-pulse'
-                              : 'bg-gray-50 border-gray-200 text-gray-400'
+                          isError 
+                            ? 'bg-red-50 border-red-200 text-red-700'
+                            : isDone 
+                              ? 'bg-green-50 border-green-200 text-green-700' 
+                              : isActive 
+                                ? 'bg-blue-50 border-blue-200 text-blue-700 animate-pulse'
+                                : 'bg-gray-50 border-gray-200 text-gray-400'
                         }`}>
                           <span className="font-medium">{step.label}</span>
-                          {isDone ? <Check size={12} /> : isActive ? <Loader2 size={12} className="animate-spin" /> : null}
+                          {isError ? <XCircle size={12} /> : isDone ? <Check size={12} /> : isActive ? <Loader2 size={12} className="animate-spin" /> : null}
                         </div>
                         {idx < 2 && <ArrowRight size={14} className="text-gray-300" />}
                       </div>
@@ -255,22 +270,29 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                     Processing complete, took {processingTime}s
                   </div>
                 )}
+                
+                {agentStatus === 'error' && (
+                  <div className="mt-4 text-xs text-red-600 flex items-center gap-1">
+                    <XCircle size={12} />
+                    Process halted due to error.
+                  </div>
+                )}
               </div>
             )}
 
             {/* Results Section */}
-            {(agentStatus === 'processing' || agentStatus === 'complete') && (
+            {(agentStatus === 'processing' || agentStatus === 'complete' || agentStatus === 'error') && (
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 animate-in slide-in-from-bottom-4">
                 
                 {/* Search Summary (Crucial for debugging and context) */}
                 {searchSummary && (
                   <div className={`mb-6 p-4 rounded-xl border ${
-                    searchSummary.includes("Error") 
+                    searchSummary.includes("Error") || searchSummary.includes("QUOTA EXCEEDED")
                       ? "bg-red-50 border-red-200 text-red-700" 
                       : "bg-blue-50/50 border-blue-100 text-slate-700"
                   }`}>
                     <h3 className="font-bold text-sm mb-2 flex items-center gap-2">
-                      {searchSummary.includes("Error") ? <AlertTriangle size={16}/> : <FileText size={16}/>}
+                      {searchSummary.includes("Error") || searchSummary.includes("QUOTA EXCEEDED") ? <AlertTriangle size={16}/> : <FileText size={16}/>}
                       Search Summary
                     </h3>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{searchSummary}</p>
