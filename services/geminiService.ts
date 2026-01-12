@@ -342,6 +342,11 @@ export const crawlUrl = async (url: string): Promise<Article> => {
 
 // Step 1: Extract Intent
 export const extractAgentIntent = async (query: string): Promise<AgentIntent> => {
+  if (!process.env.API_KEY) {
+    // If API KEY is missing, return a dummy intent so the flow fails gracefully later or shows error
+    return { event: "Error: API Key Missing", location: "Check Settings", contactPerson: "-", phone: "-" };
+  }
+
   const prompt = `Analyze the search query and extract structured intent fields.
   Query: "${query}"
   
@@ -385,6 +390,13 @@ export const extractAgentIntent = async (query: string): Promise<AgentIntent> =>
 
 // Step 2: Search with Grounding
 export const searchWithGrounding = async (query: string): Promise<{ text: string, links: SearchResult[] }> => {
+  if (!process.env.API_KEY) {
+    return { 
+      text: "Configuration Error: API_KEY is missing. Please add 'API_KEY' to your Vercel Environment Variables.", 
+      links: [] 
+    };
+  }
+
   try {
     // Note: googleSearch tool is only available for Gemini models
     if (currentProvider !== 'gemini') {
@@ -418,9 +430,12 @@ export const searchWithGrounding = async (query: string): Promise<{ text: string
     });
 
     return { text, links };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Search failed:", error);
-    return { text: "Search functionality encountered an error.", links: [] };
+    return { 
+      text: `Search API Error: ${error.message || 'Unknown error'}. Please check your API Key and billing status.`, 
+      links: [] 
+    };
   }
 };
 
@@ -467,6 +482,11 @@ export const structureLeads = async (rawText: string): Promise<AgentLead[]> => {
 
 // Step 3 (Streaming): Structure Leads with stream
 export async function* structureLeadsStream(rawText: string) {
+  // If the raw text indicates an error, don't try to parse leads
+  if (rawText.startsWith("Configuration Error") || rawText.startsWith("Search API Error")) {
+    return;
+  }
+
   const prompt = `Extract a list of law firms or lawyers from the text below. 
   Format as a JSON array.
   

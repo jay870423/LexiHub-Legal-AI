@@ -7,7 +7,7 @@ import {
 } from '../services/geminiService';
 import { 
   Zap, Loader2, CheckCircle2, Download,
-  ArrowRight, Check, Sparkles, Phone
+  ArrowRight, Check, Sparkles, Phone, AlertTriangle, FileText
 } from 'lucide-react';
 
 interface KnowledgeBaseProps {
@@ -20,6 +20,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
   const [agentStatus, setAgentStatus] = useState<'idle' | 'identifying' | 'searching' | 'processing' | 'complete'>('idle');
   const [intentData, setIntentData] = useState<AgentIntent | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchSummary, setSearchSummary] = useState<string>("");
   const [generatedLeads, setGeneratedLeads] = useState<AgentLead[]>([]);
   const [processingTime, setProcessingTime] = useState(0);
   const [processingProgress, setProcessingProgress] = useState(0);
@@ -71,6 +72,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
     setAgentStatus('identifying');
     setIntentData(null);
     setSearchResults([]);
+    setSearchSummary("");
     setGeneratedLeads([]);
     setProcessingTime(0);
     setProcessingProgress(0);
@@ -90,6 +92,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
       // Step 2: Search with Grounding
       const searchRes = await searchWithGrounding(`${intent.event} lawyer in ${intent.location} ${intent.contactPerson !== '-' ? intent.contactPerson : ''}`);
       setSearchResults(searchRes.links);
+      setSearchSummary(searchRes.text);
       setAgentStatus('processing');
 
       // Step 3: LLM Structure (Streaming)
@@ -110,12 +113,14 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
          // Sometimes the model outputs markdown code blocks around JSON even if schema is set,
          // though schema usually forces pure JSON. Let's be safe.
          const cleanJson = accumulatedText.replace(/```json\n?|\n?```/g, '').trim();
-         const leads = JSON.parse(cleanJson);
-         setGeneratedLeads(leads);
-         
-         // Notify parent app for dashboard stats
-         if (onLeadsGenerated && leads.length > 0) {
-           onLeadsGenerated(leads.length);
+         if (cleanJson && cleanJson.length > 0) {
+             const leads = JSON.parse(cleanJson);
+             setGeneratedLeads(leads);
+             
+             // Notify parent app for dashboard stats
+             if (onLeadsGenerated && leads.length > 0) {
+               onLeadsGenerated(leads.length);
+             }
          }
       } catch (parseError) {
          console.warn("JSON Parse Error on stream result, attempting regex extraction...", parseError);
@@ -137,8 +142,9 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
 
     } catch (e) {
       console.error(e);
-      alert("Agent failed during process. Please try again.");
-      setAgentStatus('idle');
+      // Don't alert here, let the status update handle it visually if possible, or simple alert
+      // alert("Agent failed during process. Please try again."); 
+      setAgentStatus('complete'); // Force complete to show what we have (error text)
     } finally {
       if (timerRef.current) clearInterval(timerRef.current);
     }
@@ -256,6 +262,21 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
             {(agentStatus === 'processing' || agentStatus === 'complete') && (
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 animate-in slide-in-from-bottom-4">
                 
+                {/* Search Summary (Crucial for debugging and context) */}
+                {searchSummary && (
+                  <div className={`mb-6 p-4 rounded-xl border ${
+                    searchSummary.includes("Error") 
+                      ? "bg-red-50 border-red-200 text-red-700" 
+                      : "bg-blue-50/50 border-blue-100 text-slate-700"
+                  }`}>
+                    <h3 className="font-bold text-sm mb-2 flex items-center gap-2">
+                      {searchSummary.includes("Error") ? <AlertTriangle size={16}/> : <FileText size={16}/>}
+                      Search Summary
+                    </h3>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{searchSummary}</p>
+                  </div>
+                )}
+
                 {/* Search Results Links */}
                 <div className="mb-8">
                   <h3 className="font-bold text-slate-800 text-lg mb-4">Search Results</h3>
@@ -274,7 +295,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                 </div>
 
                 {/* Leads Table */}
-                {agentStatus === 'complete' && (
+                {agentStatus === 'complete' && generatedLeads.length > 0 && (
                 <div className="border-t border-gray-100 pt-6 animate-in fade-in">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
                      <h3 className="font-bold text-slate-800 text-lg">Generated {generatedLeads.length} leads</h3>
@@ -327,13 +348,17 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                         ))}
                       </tbody>
                     </table>
-                    {generatedLeads.length === 0 && (
-                      <div className="py-12 text-center text-slate-400 bg-slate-50">
-                        <p>No structured leads could be extracted.</p>
-                      </div>
-                    )}
                   </div>
                 </div>
+                )}
+                
+                {agentStatus === 'complete' && generatedLeads.length === 0 && (
+                   <div className="py-8 text-center text-slate-400 bg-slate-50 border-t border-gray-100 rounded-b-2xl">
+                     <p>No structured leads could be extracted.</p>
+                     {searchSummary.includes("Error") && (
+                       <p className="text-xs text-red-400 mt-2">See error details above.</p>
+                     )}
+                   </div>
                 )}
 
               </div>
