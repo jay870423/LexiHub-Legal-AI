@@ -3,6 +3,9 @@ export enum ContentType {
   ANNOUNCEMENT = 'ANNOUNCEMENT', // 公告
   ARTICLE = 'ARTICLE', // 推文
   REGULATION = 'REGULATION', // 法规
+  REPORT = 'REPORT', // 报告
+  DATA = 'DATA', // 数据图表
+  MEETING_NOTE = 'MEETING_NOTE', // 会议纪要
 }
 
 export interface Subscription {
@@ -34,6 +37,16 @@ export interface Article {
   analysis?: AnalysisResult;
 }
 
+// New Interface for Personal Workspace Documents
+export interface PersonalDoc {
+  id: string;
+  title: string;
+  category: 'Report' | 'Meeting' | 'Data' | 'Other';
+  content: string;
+  tags: string[];
+  updatedAt: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'model' | 'system';
@@ -43,7 +56,7 @@ export interface Message {
   searchResults?: Array<{ title: string; uri: string }>; // For Google Search results
 }
 
-export type ViewState = 'dashboard' | 'knowledge' | 'chat' | 'settings';
+export type ViewState = 'dashboard' | 'knowledge' | 'workspace' | 'chat' | 'settings';
 
 export type AIProvider = 'gemini' | 'deepseek';
 

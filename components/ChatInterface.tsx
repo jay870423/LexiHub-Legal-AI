@@ -1,18 +1,35 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Article, Message } from '../types';
+import { Article, Message, PersonalDoc } from '../types';
 import { streamChatMessage, getGlobalProvider } from '../services/geminiService';
-import { Send, User, Bot, FileText, Loader2, Sparkles, AlertTriangle } from 'lucide-react';
+import { Send, User, Bot, FileText, Loader2, Sparkles, AlertTriangle, Database, FolderKanban, X, ExternalLink, Calendar } from 'lucide-react';
 
 interface ChatInterfaceProps {
   articles: Article[];
+  personalDocs: PersonalDoc[];
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles }) => {
+type KnowledgeSource = 'public_demo' | 'personal_workspace';
+
+// Helper Interface for the Modal Content
+interface ReferenceContent {
+  title: string;
+  content: string;
+  source: string;
+  url?: string;
+  date?: string;
+}
+
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs }) => {
   const [messages, setMessages] = useState<Message[]>([
-    { id: '0', role: 'model', content: 'Hello. I am LexiHub, your AI Legal Assistant. I can analyze regulations and answer questions based on your Knowledge Base.' }
+    { id: '0', role: 'model', content: 'Hello. I am LexiHub, your AI Legal Assistant. Select a knowledge source below and ask me anything.' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [sourceMode, setSourceMode] = useState<KnowledgeSource>('public_demo');
+  
+  // Reference Modal State
+  const [selectedReference, setSelectedReference] = useState<ReferenceContent | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const isMounted = useRef(true);
 
@@ -34,14 +51,36 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles }) => {
     setInput('');
     setIsLoading(true);
 
+    // --- RAG LOGIC START ---
     const keywords = input.toLowerCase().split(' ').filter(w => w.length > 2);
-    const relevantArticles = articles.filter(a => 
-      keywords.some(k => a.title.toLowerCase().includes(k) || a.content.toLowerCase().includes(k))
-    );
-    
-    const context = relevantArticles.length > 0 
-      ? relevantArticles.map(a => `SOURCE: ${a.title}\nCONTENT: ${a.content}\nANALYSIS: ${JSON.stringify(a.analysis || {})}`).join('\n\n')
-      : "No specific documents found in knowledge base.";
+    let context = "";
+    let sources: string[] = [];
+
+    if (sourceMode === 'public_demo') {
+      const relevantArticles = articles.filter(a => 
+        keywords.some(k => a.title.toLowerCase().includes(k) || a.content.toLowerCase().includes(k))
+      );
+      
+      context = relevantArticles.length > 0 
+        ? relevantArticles.map(a => `SOURCE: ${a.title}\nTYPE: ${a.type}\nCONTENT: ${a.content}\nANALYSIS: ${JSON.stringify(a.analysis || {})}`).join('\n\n')
+        : "No specific documents found in public knowledge base.";
+      
+      sources = relevantArticles.map(a => a.title);
+
+    } else {
+      const relevantDocs = personalDocs.filter(d => 
+        keywords.some(k => d.title.toLowerCase().includes(k) || d.content.toLowerCase().includes(k) || d.tags.some(t => t.toLowerCase().includes(k)))
+      );
+
+      const topDocs = relevantDocs.slice(0, 5);
+
+      context = topDocs.length > 0
+        ? topDocs.map(d => `SOURCE: ${d.title}\nCATEGORY: ${d.category}\nUPDATED: ${d.updatedAt}\nCONTENT: ${d.content}`).join('\n\n')
+        : "No relevant documents found in your personal workspace.";
+
+      sources = topDocs.map(d => d.title);
+    }
+    // --- RAG LOGIC END ---
 
     const historyForApi = messages.map(m => ({ role: m.role, content: m.content }));
 
@@ -50,7 +89,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles }) => {
       id: botMsgId,
       role: 'model',
       content: '', 
-      sources: relevantArticles.map(a => a.title)
+      sources: sources
     };
     
     setMessages(prev => [...prev, initialBotMsg]);
@@ -76,12 +115,64 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles }) => {
     }
   };
 
-  const currentProvider = getGlobalProvider();
+  // Handle clicking a citation source
+  const handleSourceClick = (sourceTitle: string) => {
+    // 1. Search in Personal Docs
+    const pDoc = personalDocs.find(d => d.title === sourceTitle);
+    if (pDoc) {
+      setSelectedReference({
+        title: pDoc.title,
+        content: pDoc.content,
+        source: "My Workspace",
+        date: new Date(pDoc.updatedAt).toLocaleDateString()
+      });
+      return;
+    }
+
+    // 2. Search in Public Articles
+    const article = articles.find(a => a.title === sourceTitle);
+    if (article) {
+      setSelectedReference({
+        title: article.title,
+        content: article.content,
+        source: article.source,
+        url: article.url,
+        date: article.publishDate
+      });
+      return;
+    }
+  };
 
   return (
-    // Use flex-col and h-full logic to ensure it fills available space in parent without hardcoding calc(100vh-...) which fails on mobile browsers with address bars
-    <div className="flex flex-col h-[calc(100vh-140px)] md:h-[calc(100vh-10rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-140px)] md:h-[calc(100vh-10rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
       
+      {/* Header with Source Toggle */}
+      <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center px-4">
+         <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
+            <Sparkles size={16} className="text-blue-500" />
+            <span>AI Assistant</span>
+         </div>
+         
+         <div className="flex bg-gray-200 p-1 rounded-lg">
+            <button 
+              onClick={() => setSourceMode('public_demo')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
+                sourceMode === 'public_demo' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+               <Database size={12} /> Public Data
+            </button>
+            <button 
+               onClick={() => setSourceMode('personal_workspace')}
+               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
+                sourceMode === 'personal_workspace' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+               <FolderKanban size={12} /> My Workspace
+            </button>
+         </div>
+      </div>
+
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 bg-slate-50 scroll-smooth" ref={scrollRef}>
         {messages.map((msg) => (
@@ -113,14 +204,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles }) => {
                   )}
                 </div>
 
+                {/* Sources Citation */}
                 {msg.role === 'model' && msg.sources && msg.sources.length > 0 && (
-                   <div className="flex flex-wrap gap-2 animate-fade-in">
-                      {msg.sources.slice(0, 3).map((src, i) => (
-                        <div key={i} className="flex items-center gap-1 text-[10px] md:text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 max-w-full truncate">
-                           <FileText size={10} className="shrink-0" />
-                           <span className="truncate max-w-[150px]">{src}</span>
-                        </div>
-                      ))}
+                   <div className="flex flex-col gap-1 animate-fade-in">
+                      <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider ml-1">References (Click to view)</span>
+                      <div className="flex flex-wrap gap-2">
+                        {msg.sources.slice(0, 5).map((src, i) => (
+                          <button 
+                            key={i} 
+                            onClick={() => handleSourceClick(src)}
+                            className="flex items-center gap-1 text-[10px] md:text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 max-w-full hover:bg-indigo-100 transition-colors"
+                          >
+                             <FileText size={10} className="shrink-0" />
+                             <span className="truncate max-w-[200px]">{src}</span>
+                          </button>
+                        ))}
+                      </div>
                    </div>
                 )}
               </div>
@@ -136,7 +235,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles }) => {
                </div>
                <div className="bg-white p-3 rounded-2xl rounded-tl-none border border-gray-200 flex items-center gap-2">
                  <Loader2 className="animate-spin text-blue-600" size={16} />
-                 <span className="text-xs text-slate-500 font-medium">Connecting...</span>
+                 <span className="text-xs text-slate-500 font-medium">Analyzing {sourceMode === 'personal_workspace' ? 'your workspace' : 'database'}...</span>
                </div>
              </div>
           </div>
@@ -151,22 +250,71 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles }) => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask LexiHub..."
+            placeholder={sourceMode === 'personal_workspace' ? "Ask about your reports, data, or notes..." : "Ask LexiHub about laws and regulations..."}
             disabled={isLoading}
-            className="flex-1 pl-4 pr-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-slate-900 transition-all shadow-inner disabled:opacity-60 text-sm md:text-base"
+            className={`flex-1 pl-4 pr-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:bg-white text-slate-900 transition-all shadow-inner disabled:opacity-60 text-sm md:text-base ${
+               sourceMode === 'personal_workspace' ? 'focus:ring-indigo-500' : 'focus:ring-blue-500'
+            }`}
           />
           <button 
             onClick={handleSend}
             disabled={isLoading || !input.trim()}
-            className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors shrink-0"
+            className={`p-3 text-white rounded-xl disabled:opacity-50 transition-colors shrink-0 ${
+               sourceMode === 'personal_workspace' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-blue-600 hover:bg-blue-700'
+            }`}
           >
             {isLoading ? <Loader2 className="animate-spin" size={20} /> : <Send size={20} />}
           </button>
         </div>
         <p className="text-center text-[10px] text-slate-400 mt-2">
-          LexiHub AI Assistant
+           Context: {sourceMode === 'personal_workspace' ? 'My Workspace' : 'Public Knowledge Base'}
         </p>
       </div>
+
+      {/* REFERENCE PREVIEW MODAL */}
+      {selectedReference && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-2xl max-h-[80%] flex flex-col animate-in zoom-in-95 duration-200">
+              {/* Modal Header */}
+              <div className="p-4 border-b border-gray-100 flex justify-between items-start gap-4 bg-gray-50 rounded-t-xl">
+                 <div>
+                    <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+                       <span className="font-semibold px-1.5 py-0.5 bg-slate-200 rounded text-slate-700">{selectedReference.source}</span>
+                       <span className="flex items-center gap-1"><Calendar size={10}/> {selectedReference.date}</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-800 leading-snug">{selectedReference.title}</h3>
+                 </div>
+                 <button 
+                   onClick={() => setSelectedReference(null)}
+                   className="p-1.5 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors"
+                 >
+                    <X size={20} />
+                 </button>
+              </div>
+              
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto p-6 prose prose-slate max-w-none text-sm">
+                 <div dangerouslySetInnerHTML={{ __html: selectedReference.content }} />
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-3 border-t border-gray-100 bg-gray-50 rounded-b-xl flex justify-end">
+                 {selectedReference.url && selectedReference.url !== '#' && (
+                    <a 
+                      href={selectedReference.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                       <span>View Original Source</span>
+                       <ExternalLink size={14} />
+                    </a>
+                 )}
+              </div>
+           </div>
+        </div>
+      )}
+
     </div>
   );
 };

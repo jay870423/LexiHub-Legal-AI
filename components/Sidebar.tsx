@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, MessageSquareText, Settings, Scale, Telescope, X } from 'lucide-react';
+import { LayoutDashboard, MessageSquareText, Settings, Scale, Telescope, FolderKanban, X } from 'lucide-react';
 import { ViewState, AIProvider } from '../types';
 
 interface SidebarProps {
@@ -14,6 +14,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentProvider
   const navItems: { id: ViewState; label: string; icon: React.ReactNode }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
     { id: 'knowledge', label: 'Lead Discovery', icon: <Telescope size={20} /> },
+    { id: 'workspace', label: 'My Workspace', icon: <FolderKanban size={20} /> },
     { id: 'chat', label: 'AI Assistant', icon: <MessageSquareText size={20} /> },
     { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
   ];
@@ -78,7 +79,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentProvider
                </span>
             </div>
             <div className="mt-1 truncate opacity-70">
-              {currentProvider === 'gemini' ? 'gemini-3-flash' : 'deepseek-v3'}
+              {currentProvider === 'gemini' ? 'gemini-2.0-flash' : 'deepseek-v3'}
             </div>
           </div>
         </div>
