@@ -15,7 +15,6 @@ interface KnowledgeBaseProps {
 }
 
 const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
-  // --- LEAD DISCOVERY STATE ---
   const [searchQuery, setSearchQuery] = useState('');
   const [agentStatus, setAgentStatus] = useState<'idle' | 'identifying' | 'searching' | 'processing' | 'complete' | 'error'>('idle');
   const [intentData, setIntentData] = useState<AgentIntent | null>(null);
@@ -24,21 +23,17 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
   const [generatedLeads, setGeneratedLeads] = useState<AgentLead[]>([]);
   const [processingTime, setProcessingTime] = useState(0);
   const [processingProgress, setProcessingProgress] = useState(0);
+  // Add state for specific error message
+  const [errorMessage, setErrorMessage] = useState<string>('');
   const timerRef = useRef<number | null>(null);
 
-  // --- CSV EXPORT LOGIC ---
   const handleExportCsv = () => {
     if (generatedLeads.length === 0) return;
-
-    // Add BOM for proper UTF-8 handling in Excel
     const BOM = '\uFEFF';
     const headers = ['Firm Name', 'Contact Person', 'Phone Number', 'Address', 'Source URL'];
-    
-    // Construct CSV rows
     const csvRows = [headers.join(',')];
     
     for (const lead of generatedLeads) {
-      // Escape quotes by doubling them
       const row = [
         `"${(lead.lawFirm || '').replace(/"/g, '""')}"`,
         `"${(lead.contact || '').replace(/"/g, '""')}"`,
@@ -51,8 +46,6 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
 
     const csvString = BOM + csvRows.join('\n');
     const filename = `legal_leads_${new Date().toISOString().slice(0, 10)}.csv`;
-    
-    // Trigger download
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -64,11 +57,9 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
     URL.revokeObjectURL(url);
   };
 
-  // --- AGENT LOGIC ---
   const handleAgentSearch = async () => {
     if (!searchQuery.trim()) return;
 
-    // Reset
     setAgentStatus('identifying');
     setIntentData(null);
     setSearchResults([]);
@@ -76,8 +67,8 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
     setGeneratedLeads([]);
     setProcessingTime(0);
     setProcessingProgress(0);
+    setErrorMessage(''); // Reset error
 
-    // Start Timer
     const startTime = Date.now();
     timerRef.current = window.setInterval(() => {
       setProcessingTime(Math.floor((Date.now() - startTime) / 1000));
@@ -94,57 +85,41 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
       setSearchResults(searchRes.links);
       setSearchSummary(searchRes.text);
 
-      // Check if search returned an explicit error flag
       if (searchRes.error) {
         setAgentStatus('error');
+        setErrorMessage(searchRes.errorMessage || "Search Tool Failed.");
         if (timerRef.current) clearInterval(timerRef.current);
-        // Even on error, we might have fallback text to process, but usually leads are empty
-        // We stop here for clarity or process fallback text if needed.
-        // If it's a fallback text, we might want to try to extract *something* or just show the text.
-        // Let's stop the automatic extraction if it's a quota error to avoid confusing "No leads" message
         return; 
       }
 
       setAgentStatus('processing');
 
-      // Step 3: LLM Structure (Streaming)
+      // Step 3: LLM Structure
       let accumulatedText = "";
       const stream = structureLeadsStream(searchRes.text);
       
       for await (const chunk of stream) {
         if (chunk) {
           accumulatedText += chunk;
-          // Heuristic progress: assuming ~1500 characters for a typical response.
-          // Increment progress but cap at 98% until finish.
           setProcessingProgress(prev => Math.min(prev + (chunk.length / 15), 98));
         }
       }
 
-      // Final Parsing
       try {
-         // Sometimes the model outputs markdown code blocks around JSON even if schema is set,
-         // though schema usually forces pure JSON. Let's be safe.
          const cleanJson = accumulatedText.replace(/```json\n?|\n?```/g, '').trim();
          if (cleanJson && cleanJson.length > 0) {
              const leads = JSON.parse(cleanJson);
              setGeneratedLeads(leads);
-             
-             // Notify parent app for dashboard stats
-             if (onLeadsGenerated && leads.length > 0) {
-               onLeadsGenerated(leads.length);
-             }
+             if (onLeadsGenerated && leads.length > 0) onLeadsGenerated(leads.length);
          }
       } catch (parseError) {
          console.warn("JSON Parse Error on stream result, attempting regex extraction...", parseError);
-         // Fallback: try to find the array brackets
          const match = accumulatedText.match(/\[[\s\S]*\]/);
          if (match) {
              try {
                 const leads = JSON.parse(match[0]);
                 setGeneratedLeads(leads);
-                if (onLeadsGenerated && leads.length > 0) {
-                  onLeadsGenerated(leads.length);
-                }
+                if (onLeadsGenerated && leads.length > 0) onLeadsGenerated(leads.length);
              } catch (e) { console.error("Fallback parsing failed", e); }
          }
       }
@@ -152,19 +127,18 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
       setProcessingProgress(100);
       setAgentStatus('complete');
 
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
       setAgentStatus('error'); 
+      setErrorMessage(e.message || "An unexpected error occurred during the workflow.");
     } finally {
       if (timerRef.current) clearInterval(timerRef.current);
     }
   };
 
-  // --- RENDER ---
   return (
     <div className="flex flex-col bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-h-[500px] md:min-h-[600px]">
       
-      {/* --- CONTENT: LEAD DISCOVERY --- */}
       <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/50">
           <div className="max-w-5xl mx-auto space-y-6 md:space-y-8">
             
@@ -199,17 +173,15 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                   {(agentStatus === 'complete' || agentStatus === 'error') && <span className="text-xs text-slate-400 font-mono">Total Time: {processingTime}s</span>}
                 </div>
 
-                {/* Steps */}
                 <div className="flex items-center gap-2 md:gap-3 text-sm mb-6 flex-wrap">
                   {[
                     { id: 'identifying', label: 'Intent Recognition' },
                     { id: 'searching', label: 'Searching' },
                     { id: 'processing', label: 'LLM Processing' }
                   ].map((step, idx) => {
-                    // Logic: If current status index >= step index, it's done or active.
                     const statuses = ['idle', 'identifying', 'searching', 'processing', 'complete'];
-                    // Special handling for error: Error typically implies search failed, so processing never happened
-                    const isError = agentStatus === 'error' && step.id === 'searching';
+                    const isError = agentStatus === 'error' && (step.id === 'searching' || step.id === 'identifying'); 
+                    // Simple logic: if error occurred during 'searching', processing is definitely not active.
                     
                     const currentIdx = statuses.indexOf(agentStatus === 'error' ? 'searching' : agentStatus);
                     const stepIdx = statuses.indexOf(step.id);
@@ -248,7 +220,6 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                   </div>
                 </div>
 
-                {/* Progress Bar during Processing */}
                 {agentStatus === 'processing' && (
                   <div className="mt-6 animate-in fade-in slide-in-from-top-1">
                     <div className="flex justify-between text-xs text-slate-500 mb-2">
@@ -256,35 +227,28 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                        <span>{Math.round(processingProgress)}%</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
-                       <div 
-                         className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out" 
-                         style={{ width: `${processingProgress}%` }}
-                       ></div>
+                       <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out" style={{ width: `${processingProgress}%` }}></div>
                     </div>
                   </div>
                 )}
                 
-                {agentStatus === 'complete' && (
-                  <div className="mt-4 text-xs text-green-600 flex items-center gap-1">
-                    <CheckCircle2 size={12} />
-                    Processing complete, took {processingTime}s
-                  </div>
-                )}
-                
                 {agentStatus === 'error' && (
-                  <div className="mt-4 text-xs text-red-600 flex items-center gap-1">
-                    <XCircle size={12} />
-                    Process halted due to error.
+                  <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-start gap-3 animate-in shake">
+                    <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+                    <div>
+                        <p className="font-bold">Error: Process Halted</p>
+                        <p className="mt-1">{errorMessage}</p>
+                        <p className="mt-2 text-xs text-red-500">Tip: Check your API Key in Settings.</p>
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
             {/* Results Section */}
-            {(agentStatus === 'processing' || agentStatus === 'complete' || agentStatus === 'error') && (
+            {(agentStatus === 'processing' || agentStatus === 'complete' || (agentStatus === 'error' && searchResults.length > 0)) && (
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 animate-in slide-in-from-bottom-4">
                 
-                {/* Search Summary (Crucial for debugging and context) */}
                 {searchSummary && (
                   <div className={`mb-6 p-4 rounded-xl border ${
                     searchSummary.includes("Error") || searchSummary.includes("QUOTA EXCEEDED")
@@ -292,14 +256,12 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                       : "bg-blue-50/50 border-blue-100 text-slate-700"
                   }`}>
                     <h3 className="font-bold text-sm mb-2 flex items-center gap-2">
-                      {searchSummary.includes("Error") || searchSummary.includes("QUOTA EXCEEDED") ? <AlertTriangle size={16}/> : <FileText size={16}/>}
-                      Search Summary
+                      <FileText size={16}/> Search Summary
                     </h3>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{searchSummary}</p>
                   </div>
                 )}
 
-                {/* Search Results Links */}
                 <div className="mb-8">
                   <h3 className="font-bold text-slate-800 text-lg mb-4">Search Results</h3>
                   <div className="space-y-3">
@@ -316,15 +278,11 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                   </div>
                 </div>
 
-                {/* Leads Table */}
                 {agentStatus === 'complete' && generatedLeads.length > 0 && (
                 <div className="border-t border-gray-100 pt-6 animate-in fade-in">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
                      <h3 className="font-bold text-slate-800 text-lg">Generated {generatedLeads.length} leads</h3>
-                     <button 
-                       onClick={handleExportCsv}
-                       className="w-full sm:w-auto text-sm text-slate-600 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors font-medium active:scale-95"
-                     >
+                     <button onClick={handleExportCsv} className="w-full sm:w-auto text-sm text-slate-600 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors font-medium active:scale-95">
                         <Download size={16} /> Export CSV
                      </button>
                   </div>
@@ -347,24 +305,16 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                             <td className="px-4 py-3 text-slate-600">{lead.contact}</td>
                             <td className="px-4 py-3 text-slate-600 font-mono text-xs">
                               {lead.phone && lead.phone !== '-' && lead.phone !== 'Unknown' ? (
-                                <a 
-                                  href={`tel:${lead.phone.replace(/[^\d+]/g, '')}`} 
-                                  className="flex items-center gap-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded-md transition-all border border-transparent hover:border-blue-100 w-fit"
-                                >
-                                  <Phone size={12} className="shrink-0" />
-                                  <span>{lead.phone}</span>
+                                <a href={`tel:${lead.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded-md transition-all border border-transparent hover:border-blue-100 w-fit">
+                                  <Phone size={12} className="shrink-0" /> <span>{lead.phone}</span>
                                 </a>
-                              ) : (
-                                <span className="text-slate-400">{lead.phone || '-'}</span>
-                              )}
+                              ) : <span className="text-slate-400">{lead.phone || '-'}</span>}
                             </td>
                             <td className="px-4 py-3 text-slate-600 max-w-[200px] truncate" title={lead.address}>{lead.address}</td>
                             <td className="px-4 py-3 text-right">
                                {lead.sourceUrl !== '-' ? (
                                  <a href={lead.sourceUrl} target="_blank" className="text-blue-600 hover:underline text-xs font-medium bg-blue-50 px-2 py-1 rounded inline-block">View</a>
-                               ) : (
-                                 <span className="text-slate-300">-</span>
-                               )}
+                               ) : <span className="text-slate-300">-</span>}
                             </td>
                           </tr>
                         ))}
@@ -377,15 +327,10 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                 {agentStatus === 'complete' && generatedLeads.length === 0 && (
                    <div className="py-8 text-center text-slate-400 bg-slate-50 border-t border-gray-100 rounded-b-2xl">
                      <p>No structured leads could be extracted.</p>
-                     {searchSummary.includes("Error") && (
-                       <p className="text-xs text-red-400 mt-2">See error details above.</p>
-                     )}
                    </div>
                 )}
-
               </div>
             )}
-
           </div>
       </div>
     </div>
