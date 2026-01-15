@@ -2,10 +2,7 @@ import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { AnalysisResult, Article, ContentType, AIProvider, AgentIntent, AgentLead, SearchResult } from "../types";
 
 // --- Configuration & State ---
-const GEMINI_MODEL_NAME = "gemini-2.0-flash"; // Fallback to 2.0 Flash as it is more stable for general keys, or use 'gemini-2.0-flash-exp'
-// If you have access to 3.0, you can revert to "gemini-3.0-flash-preview"
-// Ideally, use a model that supports Search. 'gemini-2.0-flash' supports search tool.
-
+const GEMINI_MODEL_NAME = "gemini-2.0-flash"; // Using 2.0 Flash as it is generally stable
 const DEEPSEEK_MODEL_NAME = "deepseek-chat";
 
 // State to track current provider and keys
@@ -53,6 +50,25 @@ export const setGlobalSerpApiKey = (key: string) => {
 };
 
 export const getGlobalProvider = () => currentProvider;
+
+// --- Helper: Retry Mechanism (Exponential Backoff) ---
+// Handles 429 (Too Many Requests) and 503 (Service Unavailable)
+const retryWithBackoff = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
+  try {
+    return await fn();
+  } catch (error: any) {
+    const msg = (error.message || JSON.stringify(error)).toLowerCase();
+    const isRateLimit = msg.includes('429') || msg.includes('resource exhausted') || msg.includes('quota exceeded');
+    const isServerOverload = msg.includes('503') || msg.includes('overloaded');
+
+    if ((isRateLimit || isServerOverload) && retries > 0) {
+      console.warn(`[LexiHub AI] Rate limit hit. Retrying in ${delay}ms... (${retries} attempts left)`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return retryWithBackoff(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+};
 
 // --- Helper: SerpApi Fetcher ---
 const callSerpApi = async (query: string): Promise<any> => {
@@ -225,7 +241,8 @@ export const analyzeArticle = async (text: string): Promise<AnalysisResult> => {
       return JSON.parse(cleanJson);
     } else {
       const googleAi = getGeminiClient();
-      const response = await googleAi.models.generateContent({
+      // Apply Retry Logic
+      const response = await retryWithBackoff(() => googleAi.models.generateContent({
         model: GEMINI_MODEL_NAME,
         contents: text,
         config: {
@@ -233,7 +250,8 @@ export const analyzeArticle = async (text: string): Promise<AnalysisResult> => {
           responseMimeType: "application/json",
           responseSchema: schema
         }
-      });
+      })) as GenerateContentResponse;
+      
       if (response.text) return JSON.parse(response.text) as AnalysisResult;
       throw new Error("Empty response from Gemini");
     }
@@ -280,7 +298,10 @@ export async function* streamChatMessage(
         config: { systemInstruction }
       });
 
-      const responseStream = await chat.sendMessageStream({ message: userQuery });
+      // Retry initializing the stream call is hard, usually chat doesn't hit limit on init but on message
+      // We wrap the sendMessageStream in a retry block for the initial request
+      const responseStream = await retryWithBackoff(() => chat.sendMessageStream({ message: userQuery })) as AsyncIterable<GenerateContentResponse>;
+      
       for await (const chunk of responseStream) {
         const c = chunk as GenerateContentResponse;
         if (c.text) yield c.text;
@@ -294,13 +315,13 @@ export async function* streamChatMessage(
 
 // 3. CRAWLER (Extraction)
 export const crawlUrl = async (url: string): Promise<Article> => {
-  // ... (Existing fetchHtml logic omitted for brevity, keeping simplified)
   const fetchHtml = async (u: string) => `<html><body>Mock Content for ${u}</body></html>`; 
   const htmlContent = await fetchHtml(url);
 
   try {
      const googleAi = getGeminiClient();
-     const response = await googleAi.models.generateContent({
+     // Apply Retry Logic
+     const response = await retryWithBackoff(() => googleAi.models.generateContent({
       model: GEMINI_MODEL_NAME,
       contents: `Extract article info from HTML: ${htmlContent.substring(0, 10000)}`,
       config: {
@@ -310,7 +331,7 @@ export const crawlUrl = async (url: string): Promise<Article> => {
           properties: { title: { type: Type.STRING }, source: { type: Type.STRING }, publishDate: { type: Type.STRING }, content: { type: Type.STRING } }
         }
       }
-    });
+    })) as GenerateContentResponse;
     const extracted = JSON.parse(response.text || "{}");
     return {
       id: `crawled-${Date.now()}`,
@@ -341,11 +362,12 @@ export const extractAgentIntent = async (query: string): Promise<AgentIntent> =>
       required: ["event", "location", "contactPerson", "phone"]
     };
 
-    const response = await googleAi.models.generateContent({
+    // Apply Retry Logic
+    const response = await retryWithBackoff(() => googleAi.models.generateContent({
       model: GEMINI_MODEL_NAME,
       contents: prompt,
       config: { responseMimeType: "application/json", responseSchema: schema }
-    });
+    })) as GenerateContentResponse;
 
     if (response.text) return JSON.parse(response.text);
     throw new Error("Empty intent response");
@@ -362,10 +384,8 @@ export const searchWithGrounding = async (query: string): Promise<{ text: string
   if (serpApiKey) {
     try {
       const data = await callSerpApi(query);
-      // ... (Existing SerpApi parsing logic - kept simple here)
       const links: SearchResult[] = [];
       let text = JSON.stringify(data).substring(0, 5000); 
-      // In real implementation, keep the detailed parsing logic from previous file
       if (data.organic_results) {
          data.organic_results.forEach((r: any) => links.push({title: r.title, url: r.link}));
       }
@@ -378,18 +398,17 @@ export const searchWithGrounding = async (query: string): Promise<{ text: string
   // Strategy 2: Gemini Grounding
   try {
     const googleAi = getGeminiClient();
-    // Use 'gemini-2.0-flash' or similar that supports tools
-    // Note: ensure model name constant matches a model that supports tools
     
-    const response = await googleAi.models.generateContent({
-      model: "gemini-2.0-flash", // Force a model known to have search (if 3.0 preview fails)
+    // Apply Retry Logic to Gemini Search
+    const response = await retryWithBackoff(() => googleAi.models.generateContent({
+      model: "gemini-2.0-flash", // Keep 2.0-flash for search tools
       contents: `Find law firms for: ${query}. List names, phones, addresses.`,
       config: {
         tools: [{ googleSearch: {} }]
       }
-    });
+    })) as GenerateContentResponse;
 
-    const text = response.text;
+    const text = response.text || "";
     if (!text) throw new Error("No text returned from Gemini Search.");
     
     const links: SearchResult[] = [];
@@ -434,14 +453,15 @@ export async function* structureLeadsStream(rawText: string) {
 
   try {
     const googleAi = getGeminiClient();
-    const streamResponse = await googleAi.models.generateContentStream({
+    // Apply Retry Logic for Stream Initialization
+    const streamResponse = await retryWithBackoff(() => googleAi.models.generateContentStream({
       model: GEMINI_MODEL_NAME,
       contents: prompt,
       config: { responseMimeType: "application/json", responseSchema: schema }
-    });
+    })) as AsyncIterable<GenerateContentResponse>;
 
     for await (const chunk of streamResponse) {
-       yield chunk.text;
+       if (chunk.text) yield chunk.text;
     }
   } catch (error: any) {
     console.error("Lead Structuring Failed:", error);

@@ -7,7 +7,7 @@ import {
 } from '../services/geminiService';
 import { 
   Zap, Loader2, CheckCircle2, Download,
-  ArrowRight, Check, Sparkles, Phone, AlertTriangle, FileText, XCircle
+  ArrowRight, Check, Sparkles, Phone, AlertTriangle, FileText, XCircle, RefreshCw
 } from 'lucide-react';
 
 interface KnowledgeBaseProps {
@@ -23,7 +23,6 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
   const [generatedLeads, setGeneratedLeads] = useState<AgentLead[]>([]);
   const [processingTime, setProcessingTime] = useState(0);
   const [processingProgress, setProcessingProgress] = useState(0);
-  // Add state for specific error message
   const [errorMessage, setErrorMessage] = useState<string>('');
   const timerRef = useRef<number | null>(null);
 
@@ -130,7 +129,13 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
     } catch (e: any) {
       console.error(e);
       setAgentStatus('error'); 
-      setErrorMessage(e.message || "An unexpected error occurred during the workflow.");
+      const rawMsg = e.message || '';
+      // User friendly message for 429
+      if (rawMsg.includes('429') || rawMsg.includes('Resource exhausted') || rawMsg.includes('Quota exceeded')) {
+        setErrorMessage("API Quota Exceeded (429). The system is retrying, but the server is busy. Please wait a moment before trying again.");
+      } else {
+        setErrorMessage(rawMsg || "An unexpected error occurred during the workflow.");
+      }
     } finally {
       if (timerRef.current) clearInterval(timerRef.current);
     }
@@ -180,18 +185,25 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                     { id: 'processing', label: 'LLM Processing' }
                   ].map((step, idx) => {
                     const statuses = ['idle', 'identifying', 'searching', 'processing', 'complete'];
-                    const isError = agentStatus === 'error' && (step.id === 'searching' || step.id === 'identifying'); 
-                    // Simple logic: if error occurred during 'searching', processing is definitely not active.
-                    
+                    const isError = agentStatus === 'error' && (step.id === 'searching' || step.id === 'identifying' || step.id === 'processing'); 
+                    // Logic to highlight where it failed
                     const currentIdx = statuses.indexOf(agentStatus === 'error' ? 'searching' : agentStatus);
+                    // If error exists, check if this step was the one that failed (approximately)
+                    // For simplicity, if error, we stop progress visualization
+                    
                     const stepIdx = statuses.indexOf(step.id);
-                    const isDone = currentIdx > stepIdx && !isError;
-                    const isActive = currentIdx === stepIdx && !isError;
+                    // Determine "Done" state
+                    let isDone = false;
+                    if (agentStatus === 'complete') isDone = true;
+                    else if (agentStatus === 'processing' && step.id !== 'processing') isDone = true;
+                    else if (agentStatus === 'searching' && step.id === 'identifying') isDone = true;
+
+                    const isActive = agentStatus === step.id;
 
                     return (
                       <div key={step.id} className="flex items-center gap-1 md:gap-2">
                         <div className={`px-2 md:px-3 py-1.5 rounded-full flex items-center gap-1.5 border text-xs md:text-sm whitespace-nowrap ${
-                          isError 
+                          isError && isActive 
                             ? 'bg-red-50 border-red-200 text-red-700'
                             : isDone 
                               ? 'bg-green-50 border-green-200 text-green-700' 
@@ -200,7 +212,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                                 : 'bg-gray-50 border-gray-200 text-gray-400'
                         }`}>
                           <span className="font-medium">{step.label}</span>
-                          {isError ? <XCircle size={12} /> : isDone ? <Check size={12} /> : isActive ? <Loader2 size={12} className="animate-spin" /> : null}
+                          {isError && isActive ? <XCircle size={12} /> : isDone ? <Check size={12} /> : isActive ? <Loader2 size={12} className="animate-spin" /> : null}
                         </div>
                         {idx < 2 && <ArrowRight size={14} className="text-gray-300" />}
                       </div>
@@ -235,11 +247,18 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                 {agentStatus === 'error' && (
                   <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-start gap-3 animate-in shake">
                     <AlertTriangle className="shrink-0 mt-0.5" size={18} />
-                    <div>
-                        <p className="font-bold">Error: Process Halted</p>
-                        <p className="mt-1">{errorMessage}</p>
-                        <p className="mt-2 text-xs text-red-500">Tip: Check your API Key in Settings.</p>
+                    <div className="flex-1">
+                        <p className="font-bold flex items-center gap-2">
+                            Error: Process Halted
+                        </p>
+                        <p className="mt-1 break-words">{errorMessage}</p>
+                        <p className="mt-2 text-xs text-red-500">
+                           {errorMessage.includes("Quota") ? "Tip: You are using the Free/Pay-as-you-go tier. Please wait a few seconds or check your billing status in Google AI Studio." : "Tip: Check your API Key in Settings."}
+                        </p>
                     </div>
+                    <button onClick={handleAgentSearch} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors flex items-center gap-1">
+                        <RefreshCw size={12}/> Retry
+                    </button>
                   </div>
                 )}
               </div>
