@@ -2,7 +2,8 @@ import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { AnalysisResult, Article, ContentType, AIProvider, AgentIntent, AgentLead, SearchResult } from "../types";
 
 // --- Configuration & State ---
-const GEMINI_MODEL_NAME = "gemini-2.0-flash"; // Using 2.0 Flash as it is generally stable
+// Using 2.0 Flash as it is generally stable for tools.
+const GEMINI_MODEL_NAME = "gemini-2.0-flash"; 
 const DEEPSEEK_MODEL_NAME = "deepseek-chat";
 
 // State to track current provider and keys
@@ -21,6 +22,13 @@ const getGeminiClient = () => {
     throw new Error("Gemini API Key is missing. Please set it in Settings or configure APP_KEY/API_KEY in Vercel.");
   }
   return new GoogleGenAI({ apiKey: geminiApiKey });
+};
+
+// Debug Helper: Get Masked Key
+export const getMaskedGeminiKey = () => {
+  if (!geminiApiKey) return "No Key";
+  if (geminiApiKey.length < 8) return "****";
+  return `...${geminiApiKey.slice(-4)}`;
 };
 
 // Configuration Setters
@@ -63,8 +71,8 @@ export const setGlobalSerpApiKey = (key: string) => {
 export const getGlobalProvider = () => currentProvider;
 
 // --- Helper: Retry Mechanism (Exponential Backoff) ---
-// Handles 429 (Too Many Requests) and 503 (Service Unavailable)
-const retryWithBackoff = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Promise<T> => {
+// UPDATED: Increased defaults to 6 retries and 4000ms delay to handle free tier limits better
+const retryWithBackoff = async <T>(fn: () => Promise<T>, retries = 5, delay = 3000): Promise<T> => {
   try {
     return await fn();
   } catch (error: any) {
@@ -73,8 +81,9 @@ const retryWithBackoff = async <T>(fn: () => Promise<T>, retries = 3, delay = 20
     const isServerOverload = msg.includes('503') || msg.includes('overloaded');
 
     if ((isRateLimit || isServerOverload) && retries > 0) {
-      console.warn(`[LexiHub AI] Rate limit hit. Retrying in ${delay}ms... (${retries} attempts left)`);
+      console.warn(`[LexiHub AI] Rate limit hit (429). Retrying in ${delay}ms... (${retries} attempts left)`);
       await new Promise(resolve => setTimeout(resolve, delay));
+      // Exponential backoff
       return retryWithBackoff(fn, retries - 1, delay * 2);
     }
     throw error;
@@ -389,7 +398,7 @@ export const extractAgentIntent = async (query: string): Promise<AgentIntent> =>
   }
 };
 
-// Step 2: Search with Grounding
+// Step 2: Search with Grounding (With Fallback)
 export const searchWithGrounding = async (query: string): Promise<{ text: string, links: SearchResult[], error?: boolean, errorMessage?: string }> => {
   // Strategy 1: SerpApi
   if (serpApiKey) {
@@ -407,17 +416,18 @@ export const searchWithGrounding = async (query: string): Promise<{ text: string
   }
 
   // Strategy 2: Gemini Grounding
+  const googleAi = getGeminiClient();
+  
   try {
-    const googleAi = getGeminiClient();
-    
-    // Apply Retry Logic to Gemini Search
+    // ATTEMPT 1: Try with Google Search Tool (Grounded)
+    console.log("[Gemini] Attempting grounded search...");
     const response = await retryWithBackoff(() => googleAi.models.generateContent({
-      model: "gemini-2.0-flash", // Keep 2.0-flash for search tools
+      model: "gemini-2.0-flash", 
       contents: `Find law firms for: ${query}. List names, phones, addresses.`,
       config: {
         tools: [{ googleSearch: {} }]
       }
-    })) as GenerateContentResponse;
+    }), 3, 2000) as GenerateContentResponse; // Reduce retries for tool to fail faster
 
     const text = response.text || "";
     if (!text) throw new Error("No text returned from Gemini Search.");
@@ -431,14 +441,33 @@ export const searchWithGrounding = async (query: string): Promise<{ text: string
     return { text, links };
 
   } catch (error: any) {
-    console.error("Gemini Search Failed:", error);
-    // Return detailed error message to be displayed in UI
-    return { 
-      text: "", 
-      links: [],
-      error: true,
-      errorMessage: error.message || "Unknown Gemini API Error"
-    };
+    console.warn("[Gemini] Grounded Search failed (likely 429). Falling back to pure generation...", error.message);
+    
+    // ATTEMPT 2: Fallback to Pure Generation (No Tool) if Quota Exceeded
+    // This allows the user to still get a result, even if it's not "live" from the web.
+    try {
+       const fallbackResponse = await retryWithBackoff(() => googleAi.models.generateContent({
+        model: GEMINI_MODEL_NAME,
+        contents: `You are a legal assistant. The user wants to find lawyers for: "${query}". 
+        Since you cannot access the internet right now, please provide general advice on how to find such a lawyer, 
+        or list any famous/well-known law firms you know from your training data in that location.
+        Mark your response clearly saying 'Note: Live search is unavailable, these are general suggestions.'`,
+      }), 2, 2000) as GenerateContentResponse;
+
+      return { 
+        text: `[SYSTEM WARNING: Search Quota Exceeded. Showing AI Knowledge instead.]\n\n${fallbackResponse.text || "No suggestions available."}`, 
+        links: [] 
+      };
+
+    } catch (fallbackError: any) {
+      console.error("Gemini Fallback Failed:", fallbackError);
+      return { 
+        text: "", 
+        links: [],
+        error: true,
+        errorMessage: `Both Search and Fallback failed. Key: ${getMaskedGeminiKey()}. Error: ${fallbackError.message}`
+      };
+    }
   }
 };
 

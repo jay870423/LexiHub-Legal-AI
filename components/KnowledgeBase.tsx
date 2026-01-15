@@ -3,7 +3,8 @@ import { AgentIntent, AgentLead, SearchResult } from '../types';
 import { 
   extractAgentIntent, 
   searchWithGrounding, 
-  structureLeadsStream
+  structureLeadsStream,
+  getMaskedGeminiKey 
 } from '../services/geminiService';
 import { 
   Zap, Loader2, CheckCircle2, Download,
@@ -56,6 +57,9 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
     URL.revokeObjectURL(url);
   };
 
+  // Helper for delays
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   const handleAgentSearch = async () => {
     if (!searchQuery.trim()) return;
 
@@ -77,6 +81,10 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
       // Step 1: Intent
       const intent = await extractAgentIntent(searchQuery);
       setIntentData(intent);
+      
+      // THROTTLE: Pause to let rate limit bucket refill
+      await wait(1500);
+
       setAgentStatus('searching');
 
       // Step 2: Search with Grounding
@@ -91,6 +99,9 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
         return; 
       }
 
+      // THROTTLE: Pause before the heavy structured generation
+      await wait(1500);
+      
       setAgentStatus('processing');
 
       // Step 3: LLM Structure
@@ -132,7 +143,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
       const rawMsg = e.message || '';
       // User friendly message for 429
       if (rawMsg.includes('429') || rawMsg.includes('Resource exhausted') || rawMsg.includes('Quota exceeded')) {
-        setErrorMessage("API Quota Exceeded (429). The system is retrying, but the server is busy. Please wait a moment before trying again.");
+        setErrorMessage(`API Quota Exceeded. Using Key ending in ${getMaskedGeminiKey()}. The search tool is heavily rate-limited even on paid tiers. Please try again in 1 minute.`);
       } else {
         setErrorMessage(rawMsg || "An unexpected error occurred during the workflow.");
       }
@@ -253,7 +264,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                         </p>
                         <p className="mt-1 break-words">{errorMessage}</p>
                         <p className="mt-2 text-xs text-red-500">
-                           {errorMessage.includes("Quota") ? "Tip: You are using the Free/Pay-as-you-go tier. Please wait a few seconds or check your billing status in Google AI Studio." : "Tip: Check your API Key in Settings."}
+                           {errorMessage.includes("Quota") ? "Tip: Google Search has strict rate limits. Try again in 30-60 seconds." : "Tip: Check your API Key in Settings."}
                         </p>
                     </div>
                     <button onClick={handleAgentSearch} className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded text-xs font-medium transition-colors flex items-center gap-1">
@@ -270,8 +281,8 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                 
                 {searchSummary && (
                   <div className={`mb-6 p-4 rounded-xl border ${
-                    searchSummary.includes("Error") || searchSummary.includes("QUOTA EXCEEDED")
-                      ? "bg-red-50 border-red-200 text-red-700" 
+                    searchSummary.includes("Error") || searchSummary.includes("QUOTA EXCEEDED") || searchSummary.includes("SYSTEM WARNING")
+                      ? "bg-orange-50 border-orange-200 text-orange-800" 
                       : "bg-blue-50/50 border-blue-100 text-slate-700"
                   }`}>
                     <h3 className="font-bold text-sm mb-2 flex items-center gap-2">
