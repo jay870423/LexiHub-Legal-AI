@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Bot, Cpu, Check, AlertCircle, Globe, Server, Eye, EyeOff, Trash2, Save, Search, ExternalLink } from 'lucide-react';
+import { Key, Bot, Cpu, Check, AlertCircle, Globe, Server, Eye, EyeOff, Trash2, Save, Search, ExternalLink, ShieldCheck } from 'lucide-react';
 import { AIProvider } from '../types';
 import { setGlobalProvider, setGlobalDeepSeekKey, setGlobalDeepSeekBaseUrl, setGlobalSerpApiKey, setGlobalGeminiKey } from '../services/geminiService';
 
@@ -53,7 +53,8 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
 
   const handleClearData = () => {
     if (window.confirm('Are you sure you want to clear all locally stored settings?')) {
-      setGlobalGeminiKey('');
+      // Logic handled in service: if passed '', it reverts to env
+      setGlobalGeminiKey(''); 
       setGlobalDeepSeekKey('');
       setGlobalDeepSeekBaseUrl('https://api.deepseek.com');
       setGlobalSerpApiKey('');
@@ -71,7 +72,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
       
       handleProviderSwitch('gemini');
       
-      alert('Settings cleared.');
+      alert('Settings cleared. System defaults restored.');
     }
   };
 
@@ -198,20 +199,29 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                       type={showKey ? "text" : "password"} 
                       value={geminiKey}
                       onChange={(e) => setGeminiKey(e.target.value)}
-                      placeholder={process.env.API_KEY ? "Using Vercel Env Var (Override here...)" : "Enter Gemini API Key..."}
-                      className="w-full pl-9 pr-10 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow"
+                      placeholder={process.env.API_KEY ? "Leave empty to use System Key (APP_KEY/API_KEY)" : "Enter Gemini API Key..."}
+                      className="w-full pl-9 pr-10 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow placeholder:text-slate-400"
                     />
                     <button onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                       {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                 </div>
+                
+                {/* Visual Feedback for System Key */}
+                {!geminiKey && process.env.API_KEY && (
+                    <div className="flex items-center gap-2 text-xs text-green-600 bg-green-50 p-2 rounded-lg border border-green-100">
+                        <ShieldCheck size={14} />
+                        <span>Using <strong>System Key</strong> configured in Vercel.</span>
+                    </div>
+                )}
+
                 {!process.env.API_KEY && !geminiKey && (
                     <p className="text-xs text-red-500 flex items-center gap-1">
                         <AlertCircle size={12}/> API Key is required for search.
                     </p>
                 )}
                 <p className="text-xs text-slate-400">
-                    You can set this in Vercel Environment Variables as <code>API_KEY</code>, or input here to save in browser.
+                    If configured in Vercel (API_KEY/APP_KEY), you can leave this field empty. Entering a key here overrides the system default.
                 </p>
               </div>
             ) : (

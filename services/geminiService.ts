@@ -10,13 +10,15 @@ let currentProvider: AIProvider = (localStorage.getItem('ai_provider') as AIProv
 let deepSeekApiKey: string = localStorage.getItem('deepseek_api_key') || '';
 let deepSeekBaseUrl: string = localStorage.getItem('deepseek_base_url')?.replace(/\/$/, '') || 'https://api.deepseek.com';
 let serpApiKey: string = localStorage.getItem('serp_api_key') || '';
+
 // Allow runtime override of Gemini Key
+// LOGIC: Check LocalStorage first, then fallback to Vercel Env Var
 let geminiApiKey: string = localStorage.getItem('gemini_api_key') || process.env.API_KEY || '';
 
 // Helper to get dynamic client
 const getGeminiClient = () => {
   if (!geminiApiKey) {
-    throw new Error("Gemini API Key is missing. Please set it in Settings or Vercel Environment Variables.");
+    throw new Error("Gemini API Key is missing. Please set it in Settings or configure APP_KEY/API_KEY in Vercel.");
   }
   return new GoogleGenAI({ apiKey: geminiApiKey });
 };
@@ -29,8 +31,17 @@ export const setGlobalProvider = (provider: AIProvider) => {
 };
 
 export const setGlobalGeminiKey = (key: string) => {
-  geminiApiKey = key;
-  localStorage.setItem('gemini_api_key', key);
+  const cleanKey = key.trim();
+  if (cleanKey) {
+    // User provided a specific key
+    geminiApiKey = cleanKey;
+    localStorage.setItem('gemini_api_key', cleanKey);
+  } else {
+    // User cleared the input, revert to System Env Var
+    localStorage.removeItem('gemini_api_key');
+    geminiApiKey = process.env.API_KEY || '';
+    console.log("[LexiHub] Gemini Key reset to System Env Var");
+  }
 };
 
 export const setGlobalDeepSeekKey = (key: string) => {

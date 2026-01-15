@@ -9,8 +9,14 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       // Polyfill process.env.API_KEY for the @google/genai SDK
-      // Priority: 1. Loaded from .env (local) 2. process.env (Vercel system env)
-      'process.env.API_KEY': JSON.stringify(env.API_KEY || process.env.API_KEY),
+      // Priority: 
+      // 1. API_KEY (Standard)
+      // 2. APP_KEY (User specific request)
+      // 3. GEMINI_API_KEY (Common alternative)
+      'process.env.API_KEY': JSON.stringify(
+        env.API_KEY || env.APP_KEY || env.GEMINI_API_KEY || 
+        process.env.API_KEY || process.env.APP_KEY || process.env.GEMINI_API_KEY
+      ),
     },
     server: {
       proxy: {
