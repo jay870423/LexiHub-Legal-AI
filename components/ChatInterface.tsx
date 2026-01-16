@@ -52,7 +52,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
     setIsLoading(true);
 
     // --- RAG LOGIC START ---
-    const keywords = input.toLowerCase().split(' ').filter(w => w.length > 2);
+    // Updated: Smarter keyword extraction for multi-language support (Chinese/English)
+    const keywords = input.toLowerCase()
+      .split(/[\s,，.。?？!！]+/) // Split by common delimiters (English & Chinese)
+      .filter(w => w.length >= 2 || /[\u4e00-\u9fa5]/.test(w)); // Keep words >= 2 chars OR any Chinese chars
+
     let context = "";
     let sources: string[] = [];
 

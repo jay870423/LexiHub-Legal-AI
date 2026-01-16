@@ -293,7 +293,15 @@ export async function* streamChatMessage(
   context: string,
   userQuery: string
 ) {
-  const systemInstruction = `You are LexiHub, a specialized Legal AI Assistant. Context:\n${context}`;
+  // UPDATED: System Prompt to enforce language matching
+  const systemInstruction = `You are LexiHub, a specialized Legal AI Assistant.
+  
+  LANGUAGE PROTOCOL:
+  1. Detect the language of the User Query (e.g., English, Chinese, Spanish).
+  2. ALWAYS respond in the SAME language as the User Query.
+  3. Use the provided Context below to answer. If the answer is not in the context, use your general legal knowledge but prioritize the context.
+
+  Context:\n${context}`;
 
   if (currentProvider === 'deepseek') {
     const deepSeekHistory = history.map(msg => ({
