@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { AnalysisResult, Article, ContentType, AIProvider, AgentIntent, AgentLead, SearchResult } from "../types";
+import { AnalysisResult, Article, ContentType, AIProvider, AgentIntent, AgentLead, SearchResult, DocumentAnalysis, Language } from "../types";
 
 // --- Configuration & State ---
 // Using 2.0 Flash as it is generally stable for tools.
@@ -90,6 +90,13 @@ const retryWithBackoff = async <T>(fn: () => Promise<T>, retries = 5, delay = 30
   }
 };
 
+// --- Helper: Clean JSON ---
+const cleanJson = (text: string) => {
+    let clean = text.replace(/```json\n?|\n?```/g, '');
+    clean = clean.replace(/```\n?|\n?```/g, '');
+    return clean.trim();
+};
+
 // --- Helper: SerpApi Fetcher ---
 const callSerpApi = async (query: string): Promise<any> => {
   if (!serpApiKey) throw new Error("SerpApi Key is missing");
@@ -156,7 +163,8 @@ const callDeepSeek = async (messages: any[], jsonMode: boolean = false) => {
         model: DEEPSEEK_MODEL_NAME,
         messages: messages,
         response_format: jsonMode ? { type: "json_object" } : { type: "text" },
-        temperature: 1.3
+        temperature: 1.3,
+        max_tokens: 4096 // Add limit to prevent truncation issues or provider defaults
       })
     });
 
@@ -257,8 +265,8 @@ export const analyzeArticle = async (text: string): Promise<AnalysisResult> => {
         { role: "user", content: `Analyze:\n${text}` }
       ];
       const jsonStr = await callDeepSeek(messages, true);
-      const cleanJson = jsonStr.replace(/```json\n?|\n?```/g, '');
-      return JSON.parse(cleanJson);
+      const cleanJsonStr = cleanJson(jsonStr);
+      return JSON.parse(cleanJsonStr);
     } else {
       const googleAi = getGeminiClient();
       // Apply Retry Logic
@@ -268,7 +276,8 @@ export const analyzeArticle = async (text: string): Promise<AnalysisResult> => {
         config: {
           systemInstruction: systemPrompt,
           responseMimeType: "application/json",
-          responseSchema: schema
+          responseSchema: schema,
+          maxOutputTokens: 8192 // Ensure sufficient tokens
         }
       })) as GenerateContentResponse;
       
@@ -287,19 +296,117 @@ export const analyzeArticle = async (text: string): Promise<AnalysisResult> => {
   }
 };
 
+// --- WORKSPACE DEEP ANALYSIS ---
+export const generateDocumentAnalysis = async (
+    title: string, 
+    content: string, 
+    category: string,
+    lang: Language = 'en'
+): Promise<DocumentAnalysis> => {
+  const outputLang = lang === 'zh' ? 'Chinese (Simplified)' : 'English';
+  
+  const systemPrompt = `You are LexiHub's Senior Legal Compliance Auditor. 
+  Your goal is to "Solve Pain Points" for the user by analyzing their document (Category: ${category}).
+  
+  PAIN POINTS TO SOLVE:
+  1. Reading long documents is tedious -> Provide a crisp Executive Summary.
+  2. Hidden risks are dangerous -> Assign a Risk Score (0-100) and list specific High/Medium/Low risks.
+  3. Not knowing what to do next -> Provide concrete Actionable Insights.
+
+  IMPORTANT: The output must be in ${outputLang}.
+
+  Output strictly in JSON.`;
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      riskScore: { type: Type.NUMBER, description: "0 is safe, 100 is critical risk." },
+      executiveSummary: { type: Type.STRING, description: "A concise summary of the document." },
+      keyRisks: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+             severity: { type: Type.STRING, enum: ["High", "Medium", "Low"] },
+             title: { type: Type.STRING },
+             description: { type: Type.STRING }
+          }
+        }
+      },
+      actionableInsights: { type: Type.ARRAY, items: { type: Type.STRING } },
+      sentiment: { type: Type.STRING, enum: ["Positive", "Neutral", "Negative", "Caution"] }
+    },
+    required: ["riskScore", "executiveSummary", "keyRisks", "actionableInsights", "sentiment"]
+  };
+
+  try {
+     // Use DeepSeek if selected, otherwise Gemini
+     if (currentProvider === 'deepseek') {
+        const messages = [
+            { role: "system", content: systemPrompt + " Return JSON matching the schema: riskScore (number), executiveSummary, keyRisks [{severity, title, description}], actionableInsights [string], sentiment." },
+            { role: "user", content: `Document Title: ${title}\n\nContent:\n${content.substring(0, 15000)}` }
+        ];
+        const jsonStr = await callDeepSeek(messages, true);
+        try {
+            return JSON.parse(cleanJson(jsonStr));
+        } catch (e) {
+            console.error("DeepSeek JSON Parse Error:", e);
+            throw new Error("DeepSeek returned malformed JSON. The document might be too large or the response was truncated.");
+        }
+     } else {
+        const googleAi = getGeminiClient();
+        const response = await retryWithBackoff(() => googleAi.models.generateContent({
+            model: GEMINI_MODEL_NAME,
+            contents: `Document Title: ${title}\n\nContent:\n${content.substring(0, 20000)}`, // Limit context
+            config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: "application/json",
+                responseSchema: schema,
+                maxOutputTokens: 8192 // Ensure we have enough output tokens for large analyses
+            }
+        })) as GenerateContentResponse;
+        
+        if (response.text) {
+             try {
+                 return JSON.parse(response.text);
+             } catch (e) {
+                 // Fallback: try cleaning markdown just in case (though schema mode shouldn't have it)
+                 try {
+                     const cleaned = cleanJson(response.text);
+                     return JSON.parse(cleaned);
+                 } catch (e2) {
+                     console.error("Gemini JSON Parse Error:", e2);
+                     throw new Error("Gemini returned malformed JSON. The response might have been truncated due to complexity.");
+                 }
+             }
+        }
+        throw new Error("No analysis returned from Gemini.");
+     }
+
+  } catch (error: any) {
+    console.error("Document Deep Analysis Failed:", error);
+    throw new Error(error.message || "Analysis Failed");
+  }
+}
+
 // 2. CHAT BOT (Streaming)
 export async function* streamChatMessage(
   history: { role: string; content: string }[], 
   context: string,
-  userQuery: string
+  userQuery: string,
+  lang: Language = 'en'
 ) {
-  // UPDATED: System Prompt to enforce language matching
+  const outputLang = lang === 'zh' ? 'Chinese (Simplified)' : 'English';
+  
+  // UPDATED: System Prompt to enforce language matching strictly
   const systemInstruction = `You are LexiHub, a specialized Legal AI Assistant.
   
   LANGUAGE PROTOCOL:
-  1. Detect the language of the User Query (e.g., English, Chinese, Spanish).
-  2. ALWAYS respond in the SAME language as the User Query.
-  3. Use the provided Context below to answer. If the answer is not in the context, use your general legal knowledge but prioritize the context.
+  1. Your interface is currently set to: ${outputLang}.
+  2. You MUST respond in ${outputLang}, regardless of the language of the provided context.
+  3. If the user asks in a different language than ${outputLang}, you should politely answer in ${outputLang} (or mirror them if appropriate, but prefer ${outputLang}).
+  
+  Use the provided Context below to answer. If the answer is not in the context, use your general legal knowledge but prioritize the context.
 
   Context:\n${context}`;
 
@@ -332,7 +439,7 @@ export async function* streamChatMessage(
       
       for await (const chunk of responseStream) {
         const c = chunk as GenerateContentResponse;
-        if (c.text) yield c.text;
+        if (c.text) yield chunk.text;
       }
     } catch (error: any) {
       console.error("Gemini Chat Error:", error);

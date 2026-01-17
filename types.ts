@@ -8,6 +8,8 @@ export enum ContentType {
   MEETING_NOTE = 'MEETING_NOTE', // 会议纪要
 }
 
+export type Language = 'en' | 'zh';
+
 export interface Subscription {
   id: string;
   name: string;
@@ -37,6 +39,19 @@ export interface Article {
   analysis?: AnalysisResult;
 }
 
+// Structured analysis for Personal Documents
+export interface DocumentAnalysis {
+  riskScore: number; // 0-100
+  executiveSummary: string;
+  keyRisks: Array<{
+    severity: 'High' | 'Medium' | 'Low';
+    title: string;
+    description: string;
+  }>;
+  actionableInsights: string[];
+  sentiment: 'Positive' | 'Neutral' | 'Negative' | 'Caution';
+}
+
 // New Interface for Personal Workspace Documents
 export interface PersonalDoc {
   id: string;
@@ -45,6 +60,7 @@ export interface PersonalDoc {
   content: string;
   tags: string[];
   updatedAt: string;
+  aiAnalysis?: DocumentAnalysis; // Store the AI result here
 }
 
 export interface Message {

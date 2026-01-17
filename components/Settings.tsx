@@ -1,20 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Bot, Cpu, Check, AlertCircle, Globe, Server, Eye, EyeOff, Trash2, Save, Search, ExternalLink, ShieldCheck } from 'lucide-react';
-import { AIProvider } from '../types';
+import { AIProvider, Language } from '../types';
 import { setGlobalProvider, setGlobalDeepSeekKey, setGlobalDeepSeekBaseUrl, setGlobalSerpApiKey, setGlobalGeminiKey } from '../services/geminiService';
+import { getTranslation } from '../utils/i18n';
 
 interface SettingsProps {
   currentProvider: AIProvider;
   setProvider: (provider: AIProvider) => void;
+  lang: Language;
 }
 
-const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => {
+const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider, lang }) => {
   const [geminiKey, setGeminiKey] = useState('');
   const [deepSeekKey, setDeepSeekKey] = useState('');
   const [deepSeekBaseUrl, setDeepSeekBaseUrl] = useState('');
   const [serpApiKey, setSerpApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  const t = getTranslation(lang);
 
   // Load existing configuration on mount
   useEffect(() => {
@@ -91,15 +95,15 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                <Search size={20} />
              </div>
              <div>
-               <h2 className="text-lg font-bold text-slate-800">Search Configuration</h2>
-               <p className="text-xs text-slate-500">Manage how LexiHub finds legal information on the web</p>
+               <h2 className="text-lg font-bold text-slate-800">{t.settings.searchConfig}</h2>
+               <p className="text-xs text-slate-500">{t.settings.searchDesc}</p>
              </div>
           </div>
         </div>
         
         <div className="p-6 space-y-4">
            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">SerpApi Key (Optional)</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">{t.settings.serpKey}</label>
               <div className="relative">
                 <Key size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input 
@@ -128,12 +132,12 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                <Cpu size={20} />
              </div>
              <div>
-               <h2 className="text-lg font-bold text-slate-800">AI Inference Engine</h2>
+               <h2 className="text-lg font-bold text-slate-800">{t.settings.engineTitle}</h2>
              </div>
           </div>
           {saveStatus === 'saved' && (
             <span className="text-green-600 text-sm font-medium flex items-center gap-1 animate-in fade-in">
-              <Check size={16} /> Saved
+              <Check size={16} /> {t.settings.saved}
             </span>
           )}
         </div>
@@ -157,7 +161,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                  {currentProvider === 'gemini' && <Check size={18} className="text-blue-600" />}
               </div>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Uses <strong>Gemini Flash</strong>. Supports Google Search Grounding.
+                {t.settings.geminiDesc}
               </p>
             </div>
 
@@ -178,7 +182,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                  {currentProvider === 'deepseek' && <Check size={18} className="text-indigo-600" />}
               </div>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Uses <strong>DeepSeek-V3</strong>.
+                {t.settings.deepseekDesc}
               </p>
             </div>
           </div>
@@ -190,7 +194,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                 <div className="flex items-center justify-between">
                     <label className="block text-sm font-medium text-slate-700">Gemini API Key</label>
                     <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                      Get Key <ExternalLink size={10} />
+                      {t.settings.getKey} <ExternalLink size={10} />
                     </a>
                 </div>
                 <div className="relative">
@@ -199,7 +203,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                       type={showKey ? "text" : "password"} 
                       value={geminiKey}
                       onChange={(e) => setGeminiKey(e.target.value)}
-                      placeholder={process.env.API_KEY ? "Leave empty to use System Key (APP_KEY/API_KEY)" : "Enter Gemini API Key..."}
+                      placeholder={process.env.API_KEY ? t.settings.leaveEmpty : "Enter Gemini API Key..."}
                       className="w-full pl-9 pr-10 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow placeholder:text-slate-400"
                     />
                     <button onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -227,7 +231,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
             ) : (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">DeepSeek API Key</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">DeepSeek {t.settings.apiKey}</label>
                   <div className="relative">
                     <Key size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input 
@@ -244,7 +248,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">API Base URL</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">{t.settings.baseUrl}</label>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
                       <Globe size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -257,7 +261,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
                       />
                     </div>
                     <button onClick={useVercelProxy} className="px-3 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-xs font-medium border border-indigo-200 flex items-center gap-1 transition-colors">
-                      <Server size={14} /> Use Vercel Proxy
+                      <Server size={14} /> {t.settings.useProxy}
                     </button>
                   </div>
                 </div>
@@ -270,7 +274,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
               onClick={handleClearData}
               className="text-red-500 text-sm hover:text-red-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 transition-colors"
             >
-              <Trash2 size={16} /> Clear Local Data
+              <Trash2 size={16} /> {t.settings.clearData}
             </button>
 
             <button 
@@ -278,7 +282,7 @@ const Settings: React.FC<SettingsProps> = ({ currentProvider, setProvider }) => 
               disabled={saveStatus === 'saving'}
               className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-all shadow-md hover:shadow-lg flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {saveStatus === 'saving' ? <>Saving...</> : <><Save size={18} /> Save Configuration</>}
+              {saveStatus === 'saving' ? <>{t.settings.saving}</> : <><Save size={18} /> {t.settings.saveConfig}</>}
             </button>
           </div>
         </div>

@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react';
-import { AgentIntent, AgentLead, SearchResult } from '../types';
+import { AgentIntent, AgentLead, SearchResult, Language } from '../types';
 import { 
   extractAgentIntent, 
   searchWithGrounding, 
   structureLeadsStream,
   getMaskedGeminiKey 
 } from '../services/geminiService';
+import { getTranslation } from '../utils/i18n';
 import { 
   Zap, Loader2, CheckCircle2, Download,
   ArrowRight, Check, Sparkles, Phone, AlertTriangle, FileText, XCircle, RefreshCw
@@ -13,9 +14,10 @@ import {
 
 interface KnowledgeBaseProps {
   onLeadsGenerated?: (count: number) => void;
+  lang: Language;
 }
 
-const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
+const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated, lang }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [agentStatus, setAgentStatus] = useState<'idle' | 'identifying' | 'searching' | 'processing' | 'complete' | 'error'>('idle');
   const [intentData, setIntentData] = useState<AgentIntent | null>(null);
@@ -27,10 +29,12 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
   const [errorMessage, setErrorMessage] = useState<string>('');
   const timerRef = useRef<number | null>(null);
 
+  const t = getTranslation(lang);
+
   const handleExportCsv = () => {
     if (generatedLeads.length === 0) return;
     const BOM = '\uFEFF';
-    const headers = ['Firm Name', 'Contact Person', 'Phone Number', 'Address', 'Source URL'];
+    const headers = [t.knowledge.table.firm, t.knowledge.table.contact, t.knowledge.table.phone, t.knowledge.table.address, t.knowledge.table.source];
     const csvRows = [headers.join(',')];
     
     for (const lead of generatedLeads) {
@@ -160,14 +164,14 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
             
             {/* Search Input Area */}
             <div className="bg-white p-4 md:p-8 rounded-2xl shadow-sm border border-gray-200">
-              <label className="block text-base font-semibold text-slate-800 mb-3">Search Query</label>
+              <label className="block text-base font-semibold text-slate-800 mb-3">{t.knowledge.searchPlaceholder}</label>
               <div className="flex flex-col md:flex-row gap-4">
                  <input 
                    type="text" 
                    value={searchQuery}
                    onChange={(e) => setSearchQuery(e.target.value)}
                    onKeyDown={(e) => e.key === 'Enter' && handleAgentSearch()}
-                   placeholder="e.g. Divorce lawyer in Beijing"
+                   placeholder={t.knowledge.searchPlaceholder}
                    className="flex-1 px-5 py-3 md:py-4 bg-gray-50 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-slate-900 placeholder:text-slate-400 text-base md:text-lg shadow-inner"
                  />
                  <button 
@@ -176,7 +180,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 md:px-8 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:shadow-none w-full md:w-auto min-w-[160px]"
                  >
                    {agentStatus !== 'idle' && agentStatus !== 'complete' && agentStatus !== 'error' ? <Loader2 className="animate-spin" size={24} /> : <Zap size={24} />}
-                   <span>Find Leads</span>
+                   <span>{t.knowledge.findLeads}</span>
                  </button>
               </div>
             </div>
@@ -185,31 +189,27 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
             {(agentStatus !== 'idle') && (
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 animate-in slide-in-from-bottom-2">
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="font-bold text-slate-800 text-lg">Workflow Status</h3>
+                  <h3 className="font-bold text-slate-800 text-lg">{t.knowledge.workflowStatus}</h3>
                   {(agentStatus === 'complete' || agentStatus === 'error') && <span className="text-xs text-slate-400 font-mono">Total Time: {processingTime}s</span>}
                 </div>
 
                 <div className="flex items-center gap-2 md:gap-3 text-sm mb-6 flex-wrap">
                   {[
-                    { id: 'identifying', label: 'Intent Recognition' },
-                    { id: 'searching', label: 'Searching' },
-                    { id: 'processing', label: 'LLM Processing' }
+                    { id: 'identifying', label: t.knowledge.steps.identifying },
+                    { id: 'searching', label: t.knowledge.steps.searching },
+                    { id: 'processing', label: t.knowledge.steps.processing }
                   ].map((step, idx) => {
                     const statuses = ['idle', 'identifying', 'searching', 'processing', 'complete'];
                     const isError = agentStatus === 'error' && (step.id === 'searching' || step.id === 'identifying' || step.id === 'processing'); 
-                    // Logic to highlight where it failed
-                    const currentIdx = statuses.indexOf(agentStatus === 'error' ? 'searching' : agentStatus);
-                    // If error exists, check if this step was the one that failed (approximately)
-                    // For simplicity, if error, we stop progress visualization
-                    
-                    const stepIdx = statuses.indexOf(step.id);
                     // Determine "Done" state
                     let isDone = false;
                     if (agentStatus === 'complete') isDone = true;
-                    else if (agentStatus === 'processing' && step.id !== 'processing') isDone = true;
-                    else if (agentStatus === 'searching' && step.id === 'identifying') isDone = true;
+                    // Approximate done logic for simple visualization
+                    if (idx === 0 && (agentStatus === 'searching' || agentStatus === 'processing')) isDone = true;
+                    if (idx === 1 && agentStatus === 'processing') isDone = true;
 
-                    const isActive = agentStatus === step.id;
+                    const isActive = agentStatus === step.id; // Correct mapping needs more complex logic if step.id != agentStatus strings exactly, but here they mostly align except for i18n label.
+                    // Actually step.id matches the state string 'identifying', 'searching', 'processing'.
 
                     return (
                       <div key={step.id} className="flex items-center gap-1 md:gap-2">
@@ -235,18 +235,18 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
                   <div className="bg-gray-50 p-3 md:p-4 rounded-xl border border-gray-100">
                     <label className="text-xs text-slate-400 block mb-1">Event / Issue</label>
-                    <div className="font-medium text-slate-800 text-sm md:text-base">{intentData?.event || (agentStatus === 'identifying' ? 'Analyzing...' : '-')}</div>
+                    <div className="font-medium text-slate-800 text-sm md:text-base">{intentData?.event || (agentStatus === 'identifying' ? '...' : '-')}</div>
                   </div>
                   <div className="bg-gray-50 p-3 md:p-4 rounded-xl border border-gray-100">
                     <label className="text-xs text-slate-400 block mb-1">Location</label>
-                    <div className="font-medium text-slate-800 text-sm md:text-base">{intentData?.location || (agentStatus === 'identifying' ? 'Analyzing...' : '-')}</div>
+                    <div className="font-medium text-slate-800 text-sm md:text-base">{intentData?.location || (agentStatus === 'identifying' ? '...' : '-')}</div>
                   </div>
                 </div>
 
                 {agentStatus === 'processing' && (
                   <div className="mt-6 animate-in fade-in slide-in-from-top-1">
                     <div className="flex justify-between text-xs text-slate-500 mb-2">
-                       <span className="flex items-center gap-1"><Sparkles size={12} className="text-blue-500" /> Generating structured leads...</span>
+                       <span className="flex items-center gap-1"><Sparkles size={12} className="text-blue-500" /> {t.knowledge.generating}</span>
                        <span>{Math.round(processingProgress)}%</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
@@ -286,14 +286,14 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                       : "bg-blue-50/50 border-blue-100 text-slate-700"
                   }`}>
                     <h3 className="font-bold text-sm mb-2 flex items-center gap-2">
-                      <FileText size={16}/> Search Summary
+                      <FileText size={16}/> {t.knowledge.searchSummary}
                     </h3>
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{searchSummary}</p>
                   </div>
                 )}
 
                 <div className="mb-8">
-                  <h3 className="font-bold text-slate-800 text-lg mb-4">Search Results</h3>
+                  <h3 className="font-bold text-slate-800 text-lg mb-4">{t.knowledge.searchResults}</h3>
                   <div className="space-y-3">
                     {searchResults.length > 0 ? searchResults.slice(0, 5).map((result, i) => (
                       <div key={i} className="flex flex-col p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-blue-100 transition-colors">
@@ -311,9 +311,9 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                 {agentStatus === 'complete' && generatedLeads.length > 0 && (
                 <div className="border-t border-gray-100 pt-6 animate-in fade-in">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
-                     <h3 className="font-bold text-slate-800 text-lg">Generated {generatedLeads.length} leads</h3>
+                     <h3 className="font-bold text-slate-800 text-lg">{t.knowledge.generatedLeads.replace('{count}', generatedLeads.length.toString())}</h3>
                      <button onClick={handleExportCsv} className="w-full sm:w-auto text-sm text-slate-600 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors font-medium active:scale-95">
-                        <Download size={16} /> Export CSV
+                        <Download size={16} /> {t.knowledge.exportCsv}
                      </button>
                   </div>
                   
@@ -321,11 +321,11 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                     <table className="w-full text-sm text-left whitespace-nowrap">
                       <thead className="bg-gray-50 text-slate-500 font-semibold border-b border-gray-200">
                         <tr>
-                          <th className="px-4 py-3">Firm Name</th>
-                          <th className="px-4 py-3">Contact</th>
-                          <th className="px-4 py-3">Phone</th>
-                          <th className="px-4 py-3">Address</th>
-                          <th className="px-4 py-3 text-right">Source</th>
+                          <th className="px-4 py-3">{t.knowledge.table.firm}</th>
+                          <th className="px-4 py-3">{t.knowledge.table.contact}</th>
+                          <th className="px-4 py-3">{t.knowledge.table.phone}</th>
+                          <th className="px-4 py-3">{t.knowledge.table.address}</th>
+                          <th className="px-4 py-3 text-right">{t.knowledge.table.source}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 bg-white">
@@ -343,7 +343,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                             <td className="px-4 py-3 text-slate-600 max-w-[200px] truncate" title={lead.address}>{lead.address}</td>
                             <td className="px-4 py-3 text-right">
                                {lead.sourceUrl !== '-' ? (
-                                 <a href={lead.sourceUrl} target="_blank" className="text-blue-600 hover:underline text-xs font-medium bg-blue-50 px-2 py-1 rounded inline-block">View</a>
+                                 <a href={lead.sourceUrl} target="_blank" className="text-blue-600 hover:underline text-xs font-medium bg-blue-50 px-2 py-1 rounded inline-block">{t.knowledge.table.view}</a>
                                ) : <span className="text-slate-300">-</span>}
                             </td>
                           </tr>
@@ -356,7 +356,7 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated }) => {
                 
                 {agentStatus === 'complete' && generatedLeads.length === 0 && (
                    <div className="py-8 text-center text-slate-400 bg-slate-50 border-t border-gray-100 rounded-b-2xl">
-                     <p>No structured leads could be extracted.</p>
+                     <p>{t.knowledge.noLeads}</p>
                    </div>
                 )}
               </div>

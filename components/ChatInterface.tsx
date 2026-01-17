@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Article, Message, PersonalDoc } from '../types';
-import { streamChatMessage, getGlobalProvider } from '../services/geminiService';
+import { Article, Message, PersonalDoc, Language } from '../types';
+import { streamChatMessage } from '../services/geminiService';
+import { getTranslation } from '../utils/i18n';
 import { Send, User, Bot, FileText, Loader2, Sparkles, AlertTriangle, Database, FolderKanban, X, ExternalLink, Calendar } from 'lucide-react';
 
 interface ChatInterfaceProps {
   articles: Article[];
   personalDocs: PersonalDoc[];
+  lang: Language;
 }
 
 type KnowledgeSource = 'public_demo' | 'personal_workspace';
@@ -19,9 +21,11 @@ interface ReferenceContent {
   date?: string;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs, lang }) => {
+  const t = getTranslation(lang);
+  
   const [messages, setMessages] = useState<Message[]>([
-    { id: '0', role: 'model', content: 'Hello. I am LexiHub, your AI Legal Assistant. Select a knowledge source below and ask me anything.' }
+    { id: '0', role: 'model', content: t.chat.welcome }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -32,6 +36,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isMounted = useRef(true);
+
+  // Update welcome message when language changes
+  useEffect(() => {
+    setMessages(prev => {
+      // Only update the initial welcome message if it's the only message or if it's still the initial one
+      if (prev.length > 0 && prev[0].id === '0') {
+         const newPrev = [...prev];
+         newPrev[0] = { ...newPrev[0], content: t.chat.welcome };
+         return newPrev;
+      }
+      return prev;
+    });
+  }, [lang, t.chat.welcome]);
 
   useEffect(() => {
     return () => { isMounted.current = false; };
@@ -99,7 +116,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
     setMessages(prev => [...prev, initialBotMsg]);
 
     try {
-      const stream = streamChatMessage(historyForApi, context, userMsg.content);
+      // UPDATED: Pass 'lang' to the service
+      const stream = streamChatMessage(historyForApi, context, userMsg.content, lang);
       let fullContent = '';
       for await (const chunk of stream) {
         if (!isMounted.current) break;
@@ -148,7 +166,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-140px)] md:h-[calc(100vh-10rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
+    <div className="flex flex-col h-[calc(100dvh-140px)] md:h-[calc(100dvh-10rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
       
       {/* Header with Source Toggle */}
       <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center px-4">
@@ -164,7 +182,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
                 sourceMode === 'public_demo' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-               <Database size={12} /> Public Data
+               <Database size={12} /> {t.chat.publicData}
             </button>
             <button 
                onClick={() => setSourceMode('personal_workspace')}
@@ -172,7 +190,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
                 sourceMode === 'personal_workspace' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-               <FolderKanban size={12} /> My Workspace
+               <FolderKanban size={12} /> {t.chat.myWorkspace}
             </button>
          </div>
       </div>
@@ -211,7 +229,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
                 {/* Sources Citation */}
                 {msg.role === 'model' && msg.sources && msg.sources.length > 0 && (
                    <div className="flex flex-col gap-1 animate-fade-in">
-                      <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider ml-1">References (Click to view)</span>
+                      <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider ml-1">{t.chat.references}</span>
                       <div className="flex flex-wrap gap-2">
                         {msg.sources.slice(0, 5).map((src, i) => (
                           <button 
@@ -239,7 +257,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
                </div>
                <div className="bg-white p-3 rounded-2xl rounded-tl-none border border-gray-200 flex items-center gap-2">
                  <Loader2 className="animate-spin text-blue-600" size={16} />
-                 <span className="text-xs text-slate-500 font-medium">Analyzing {sourceMode === 'personal_workspace' ? 'your workspace' : 'database'}...</span>
+                 <span className="text-xs text-slate-500 font-medium">{t.chat.analyzing}</span>
                </div>
              </div>
           </div>
@@ -254,7 +272,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={sourceMode === 'personal_workspace' ? "Ask about your reports, data, or notes..." : "Ask LexiHub about laws and regulations..."}
+            placeholder={sourceMode === 'personal_workspace' ? t.chat.inputPlaceholderPersonal : t.chat.inputPlaceholderPublic}
             disabled={isLoading}
             className={`flex-1 pl-4 pr-4 py-3 bg-gray-50 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:bg-white text-slate-900 transition-all shadow-inner disabled:opacity-60 text-sm md:text-base ${
                sourceMode === 'personal_workspace' ? 'focus:ring-indigo-500' : 'focus:ring-blue-500'
@@ -271,7 +289,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
           </button>
         </div>
         <p className="text-center text-[10px] text-slate-400 mt-2">
-           Context: {sourceMode === 'personal_workspace' ? 'My Workspace' : 'Public Knowledge Base'}
+           {t.chat.context}: {sourceMode === 'personal_workspace' ? t.chat.myWorkspace : t.chat.publicData}
         </p>
       </div>
 
@@ -310,7 +328,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs })
                       rel="noopener noreferrer"
                       className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors"
                     >
-                       <span>View Original Source</span>
+                       <span>{t.chat.viewOriginal}</span>
                        <ExternalLink size={14} />
                     </a>
                  )}

@@ -1,6 +1,8 @@
 import React from 'react';
-import { LayoutDashboard, MessageSquareText, Settings, Scale, Telescope, FolderKanban, X } from 'lucide-react';
-import { ViewState, AIProvider } from '../types';
+import { LayoutDashboard, MessageSquareText, Settings, Scale, Telescope, FolderKanban, X, Globe, LogIn, LogOut, User } from 'lucide-react';
+import { ViewState, AIProvider, Language } from '../types';
+import { getTranslation } from '../utils/i18n';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface SidebarProps {
   currentView: ViewState;
@@ -8,15 +10,22 @@ interface SidebarProps {
   currentProvider: AIProvider;
   isOpen: boolean;
   onClose: () => void;
+  lang: Language;
+  setLang: (lang: Language) => void;
+  user: SupabaseUser | null;
+  onLoginClick: () => void;
+  onLogoutClick: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentProvider, isOpen, onClose }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentProvider, isOpen, onClose, lang, setLang, user, onLoginClick, onLogoutClick }) => {
+  const t = getTranslation(lang);
+
   const navItems: { id: ViewState; label: string; icon: React.ReactNode }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
-    { id: 'knowledge', label: 'Lead Discovery', icon: <Telescope size={20} /> },
-    { id: 'workspace', label: 'My Workspace', icon: <FolderKanban size={20} /> },
-    { id: 'chat', label: 'AI Assistant', icon: <MessageSquareText size={20} /> },
-    { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
+    { id: 'dashboard', label: t.nav.dashboard, icon: <LayoutDashboard size={20} /> },
+    { id: 'knowledge', label: t.nav.discovery, icon: <Telescope size={20} /> },
+    { id: 'workspace', label: t.nav.workspace, icon: <FolderKanban size={20} /> },
+    { id: 'chat', label: t.nav.assistant, icon: <MessageSquareText size={20} /> },
+    { id: 'settings', label: t.nav.settings, icon: <Settings size={20} /> },
   ];
 
   return (
@@ -69,11 +78,60 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentProvider
           ))}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
+        <div className="p-4 border-t border-slate-800 space-y-4">
+          
+          {/* User Profile / Login */}
+          {user ? (
+            <div className="bg-slate-800 rounded-lg p-3">
+               <div className="flex items-center gap-3 mb-3">
+                  {user.user_metadata?.avatar_url ? (
+                    <img src={user.user_metadata.avatar_url} alt="User" className="w-8 h-8 rounded-full border border-slate-600" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center">
+                        <User size={16} className="text-slate-400" />
+                    </div>
+                  )}
+                  <div className="overflow-hidden">
+                     <div className="text-xs text-slate-400">{t.nav.welcomeUser}</div>
+                     <div className="text-sm font-semibold truncate text-white">{user.user_metadata?.full_name || user.email?.split('@')[0]}</div>
+                  </div>
+               </div>
+               <button 
+                 onClick={onLogoutClick}
+                 className="w-full flex items-center justify-center gap-2 py-1.5 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-slate-700 rounded transition-colors"
+               >
+                 <LogOut size={12} /> {t.nav.logout}
+               </button>
+            </div>
+          ) : (
+             <button 
+               onClick={onLoginClick}
+               className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium transition-colors shadow-sm text-sm"
+             >
+               <LogIn size={16} /> {t.nav.login}
+             </button>
+          )}
+
+          {/* Language Switcher */}
+          <div className="flex bg-slate-800 p-1 rounded-lg">
+             <button 
+               onClick={() => setLang('en')}
+               className={`flex-1 py-1.5 text-xs font-medium rounded transition-all ${lang === 'en' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}
+             >
+               English
+             </button>
+             <button 
+               onClick={() => setLang('zh')}
+               className={`flex-1 py-1.5 text-xs font-medium rounded transition-all ${lang === 'zh' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}`}
+             >
+               中文
+             </button>
+          </div>
+
           <div className="bg-slate-800 rounded-lg p-3 text-xs text-slate-400 transition-colors hover:bg-slate-700">
-            <p className="font-semibold text-slate-300 mb-1">Status: Online</p>
+            <p className="font-semibold text-slate-300 mb-1">{t.nav.status}: {t.nav.online}</p>
             <div className="flex justify-between items-center">
-               <span>Provider:</span>
+               <span>{t.nav.provider}:</span>
                <span className={`font-mono ${currentProvider === 'gemini' ? 'text-blue-400' : 'text-indigo-400'}`}>
                  {currentProvider === 'gemini' ? 'Gemini' : 'DeepSeek'}
                </span>
