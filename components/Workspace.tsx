@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { PersonalDoc } from '../types';
-import { Plus, FileText, Trash2, Edit2, Save, X, Search, FileBarChart, Calendar, Tag, Upload, AlertCircle } from 'lucide-react';
+import { Plus, FileText, Trash2, Edit2, Save, X, Search, FileBarChart, Calendar, Tag, Upload, AlertCircle, MoreHorizontal } from 'lucide-react';
 
 interface WorkspaceProps {
   documents: PersonalDoc[];
@@ -63,19 +63,28 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments }) => {
     setIsEditing(false);
   };
 
-  // FIX: Explicitly use window.confirm and ensure state updates
-  const handleDelete = (id: string) => {
+  // Robust Delete Handler
+  const handleDelete = (e: React.MouseEvent, id: string) => {
+    // Nuclear option to stop all propagation
+    e.preventDefault();
+    e.stopPropagation();
+    e.nativeEvent.stopImmediatePropagation();
+    
     if (window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
-      // 1. Deselect if currently selected
-      if (selectedDocId === id) {
-        setSelectedDocId(null);
-      }
-      // 2. Remove from list
-      setDocuments(prev => prev.filter(d => d.id !== id));
+        // 1. Deselect if currently selected
+        if (selectedDocId === id) {
+            setSelectedDocId(null);
+            setIsEditing(false);
+        }
+        // 2. Remove from list
+        setDocuments(prev => {
+            const newDocs = prev.filter(d => d.id !== id);
+            return newDocs;
+        });
     }
   };
 
-  // NEW: Handle File Import
+  // Handle File Import
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -167,36 +176,49 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments }) => {
              <div className="text-center py-10 text-slate-400 text-sm flex flex-col items-center gap-2">
                 <AlertCircle size={24} className="opacity-20"/>
                 <span>No documents found.</span>
+                {searchTerm && <span className="text-xs text-slate-300">Try different keywords in content or tags.</span>}
              </div>
           ) : (
             filteredDocs.map(doc => (
               <div 
                 key={doc.id}
                 onClick={() => handleSelectDoc(doc)}
-                className={`p-3 rounded-lg cursor-pointer transition-all border ${
+                className={`group p-3 rounded-lg cursor-pointer transition-all border relative ${
                   selectedDocId === doc.id 
-                    ? 'bg-white border-blue-500 shadow-md scale-[1.02]' 
+                    ? 'bg-white border-blue-500 shadow-md scale-[1.02] z-10' 
                     : 'bg-white border-transparent hover:bg-gray-100 hover:border-gray-200'
                 }`}
               >
                 <div className="flex justify-between items-start mb-1">
-                  <h4 className={`font-semibold text-sm truncate pr-2 ${selectedDocId === doc.id ? 'text-blue-700' : 'text-slate-800'}`}>
+                  <h4 className={`font-semibold text-sm truncate pr-2 flex-1 ${selectedDocId === doc.id ? 'text-blue-700' : 'text-slate-800'}`}>
                     {doc.title || "Untitled"}
                   </h4>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 shrink-0">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 shrink-0 ml-2">
                     {doc.category}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 line-clamp-2 mb-2 h-8 break-all">
+                <p className="text-xs text-slate-500 line-clamp-2 mb-2 h-8 break-all pr-4">
                   {doc.content?.substring(0, 100) || "No content..."}
                 </p>
-                <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                  <Calendar size={10} />
-                  <span>{new Date(doc.updatedAt).toLocaleDateString()}</span>
-                  {/* Content Match Indicator */}
-                  {searchTerm && !doc.title.toLowerCase().includes(searchTerm.toLowerCase()) && doc.content.toLowerCase().includes(searchTerm.toLowerCase()) && (
-                    <span className="text-blue-500 ml-auto font-medium">Match in content</span>
-                  )}
+                <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                      <Calendar size={10} />
+                      <span>{new Date(doc.updatedAt).toLocaleDateString()}</span>
+                      {/* Content Match Indicator */}
+                      {searchTerm && !doc.title.toLowerCase().includes(searchTerm.toLowerCase()) && doc.content.toLowerCase().includes(searchTerm.toLowerCase()) && (
+                          <span className="text-blue-500 font-medium bg-blue-50 px-1 rounded">Match</span>
+                      )}
+                    </div>
+                    
+                    {/* Sidebar Delete Button (Ensured to be on top with z-50 and stopPropagation) */}
+                    <button 
+                        type="button"
+                        onClick={(e) => handleDelete(e, doc.id)}
+                        className="opacity-0 group-hover:opacity-100 p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-all relative z-50"
+                        title="Delete"
+                    >
+                        <Trash2 size={16} />
+                    </button>
                 </div>
               </div>
             ))
@@ -209,7 +231,7 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments }) => {
         {selectedDoc ? (
           <>
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
-               <div className="overflow-hidden mr-4">
+               <div className="overflow-hidden mr-4 flex-1">
                   {isEditing ? (
                     <input 
                       type="text" 
@@ -241,11 +263,8 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments }) => {
                     <>
                       <button 
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(selectedDoc.id);
-                        }} 
-                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        onClick={(e) => handleDelete(e, selectedDoc.id)}
+                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100 relative z-20"
                         title="Delete Document"
                       >
                         <Trash2 size={18} />
