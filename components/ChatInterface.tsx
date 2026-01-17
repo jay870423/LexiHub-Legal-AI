@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Article, Message, PersonalDoc, Language } from '../types';
 import { streamChatMessage } from '../services/geminiService';
+import { supabase } from '../services/supabase';
 import { getTranslation } from '../utils/i18n';
-import { Send, User, Bot, FileText, Loader2, Sparkles, AlertTriangle, Database, FolderKanban, X, ExternalLink, Calendar } from 'lucide-react';
+import { Send, User, Bot, FileText, Loader2, Sparkles, AlertTriangle, Database, FolderKanban, X, ExternalLink, Calendar, Cloud, HardDrive } from 'lucide-react';
 
 interface ChatInterfaceProps {
   articles: Article[];
@@ -30,12 +31,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs, l
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sourceMode, setSourceMode] = useState<KnowledgeSource>('public_demo');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   
   // Reference Modal State
   const [selectedReference, setSelectedReference] = useState<ReferenceContent | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isMounted = useRef(true);
+
+  useEffect(() => {
+     // Check auth for UI indicator
+     supabase.auth.getSession().then(({ data: { session } }) => {
+        setIsLoggedIn(!!session?.user);
+     });
+  }, []);
 
   // Update welcome message when language changes
   useEffect(() => {
@@ -169,13 +178,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs, l
     <div className="flex flex-col h-[calc(100dvh-140px)] md:h-[calc(100dvh-10rem)] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
       
       {/* Header with Source Toggle */}
-      <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center px-4">
-         <div className="flex items-center gap-2 text-sm text-slate-500 font-medium">
+      <div className="p-3 border-b border-gray-100 bg-gray-50 flex flex-col md:flex-row justify-between items-center px-4 gap-2 md:gap-0">
+         <div className="flex items-center gap-2 text-sm text-slate-500 font-medium self-start md:self-center">
             <Sparkles size={16} className="text-blue-500" />
             <span>AI Assistant</span>
          </div>
          
-         <div className="flex bg-gray-200 p-1 rounded-lg">
+         <div className="flex bg-gray-200 p-1 rounded-lg self-end md:self-center">
             <button 
               onClick={() => setSourceMode('public_demo')}
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
@@ -194,6 +203,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ articles, personalDocs, l
             </button>
          </div>
       </div>
+      
+      {/* Source Status Bar */}
+      {sourceMode === 'personal_workspace' && (
+         <div className={`px-4 py-1.5 text-[10px] font-medium flex items-center justify-center gap-1.5 border-b ${
+             isLoggedIn ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-gray-50 text-gray-500 border-gray-100'
+         }`}>
+             {isLoggedIn ? <Cloud size={10} /> : <HardDrive size={10} />}
+             <span>Source: {isLoggedIn ? 'Synced Cloud Workspace' : 'Local Guest Workspace'}</span>
+             <span className="opacity-50">•</span>
+             <span>{personalDocs.length} Documents Available</span>
+         </div>
+      )}
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 bg-slate-50 scroll-smooth" ref={scrollRef}>

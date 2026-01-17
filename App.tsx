@@ -8,7 +8,7 @@ import Workspace from './components/Workspace';
 import Settings from './components/Settings';
 import AuthModal from './components/AuthModal';
 import { getGlobalProvider } from './services/geminiService';
-import { supabase, signOut } from './services/supabase';
+import { supabase, signOut, fetchUserStats, fetchDocuments } from './services/supabase';
 import { getTranslation } from './utils/i18n';
 import { TrendingUp, Activity, Cpu, Users, Menu } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
@@ -81,10 +81,25 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   
+  // Session State
+  const [sessionLeads, setSessionLeads] = useState<number>(0);
+  const [sessionQueries, setSessionQueries] = useState<number>(0);
+  const [articles] = useState(INITIAL_ARTICLES); 
+
+  // --- NEW: Personal Workspace State ---
+  const [personalDocs, setPersonalDocs] = useState<PersonalDoc[]>(() => {
+    // Initial Load: Try LocalStorage first (Guest Mode)
+    try {
+      const saved = localStorage.getItem('lexihub_personal_docs');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  
   // Language State
   const [lang, setLang] = useState<Language>(() => {
     const saved = localStorage.getItem('lexihub_language');
-    // Validation: Only allow 'en' or 'zh'. Default to 'en' otherwise.
     if (saved === 'zh') return 'zh';
     return 'en';
   });
@@ -93,45 +108,74 @@ const App: React.FC = () => {
     localStorage.setItem('lexihub_language', lang);
   }, [lang]);
   
-  // Supabase Auth Listener
+  // Sync Guest Data to LocalStorage
   useEffect(() => {
-    // Check active session
+    if (!user) {
+       localStorage.setItem('lexihub_personal_docs', JSON.stringify(personalDocs));
+    }
+  }, [personalDocs, user]);
+
+  // --- AUTH & DATA SYNC LOGIC ---
+  useEffect(() => {
+    // 1. Check active session on mount
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      handleUserSession(session?.user ?? null);
     });
 
-    // Listen for changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    // 2. Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      handleUserSession(session?.user ?? null);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const t = getTranslation(lang);
+  const handleUserSession = async (currentUser: User | null) => {
+    setUser(currentUser);
+    
+    if (currentUser) {
+       // --- LOGGED IN: FETCH FROM SUPABASE ---
+       console.log("[App] User logged in, syncing cloud data...");
+       await syncUserData(currentUser);
+    } else {
+       // --- GUEST: REVERT TO LOCAL STORAGE ---
+       console.log("[App] Guest mode, loading local data...");
+       loadLocalData();
+    }
+  };
 
-  // Session State for Dashboard
-  const [sessionLeads, setSessionLeads] = useState<number>(0);
-  const [sessionQueries, setSessionQueries] = useState<number>(0);
-  const [articles] = useState(INITIAL_ARTICLES); 
+  const syncUserData = async (currentUser: User) => {
+    // 1. Fetch Docs
+    try {
+        const cloudDocs = await fetchDocuments();
+        setPersonalDocs(cloudDocs);
+    } catch (e) {
+        console.error("Failed to sync documents:", e);
+    }
 
-  // --- NEW: Personal Workspace State ---
-  const [personalDocs, setPersonalDocs] = useState<PersonalDoc[]>(() => {
-    // Load from local storage on mount
+    // 2. Fetch Stats
+    try {
+        const stats = await fetchUserStats();
+        if (stats) {
+            setSessionLeads(stats.leadsGenerated);
+            setSessionQueries(stats.queriesCount);
+        }
+    } catch (e) {
+        console.error("Failed to load stats", e);
+    }
+  };
+
+  const loadLocalData = () => {
     try {
       const saved = localStorage.getItem('lexihub_personal_docs');
-      return saved ? JSON.parse(saved) : [];
+      setPersonalDocs(saved ? JSON.parse(saved) : []);
+      // Reset session stats for guest
+      setSessionLeads(0);
+      setSessionQueries(0);
     } catch (e) {
-      return [];
+      setPersonalDocs([]);
     }
-  });
-
-  // Save to local storage whenever docs change
-  useEffect(() => {
-    localStorage.setItem('lexihub_personal_docs', JSON.stringify(personalDocs));
-  }, [personalDocs]);
+  };
 
   const handleLeadsGenerated = (count: number) => {
     setSessionLeads(prev => prev + count);
@@ -141,11 +185,13 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     try {
       await signOut();
-      alert('Signed out successfully.');
+      // handleUserSession will be triggered by onAuthStateChange
     } catch (error) {
       console.error(error);
     }
   };
+
+  const t = getTranslation(lang);
 
   return (
     <div className="flex min-h-[100dvh] bg-gray-50">

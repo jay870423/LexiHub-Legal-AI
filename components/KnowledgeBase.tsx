@@ -6,6 +6,7 @@ import {
   structureLeadsStream,
   getMaskedGeminiKey 
 } from '../services/geminiService';
+import { incrementUserStats } from '../services/supabase';
 import { getTranslation } from '../utils/i18n';
 import { 
   Zap, Loader2, CheckCircle2, Download,
@@ -119,12 +120,13 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated, lang })
         }
       }
 
+      let leadsCount = 0;
       try {
          const cleanJson = accumulatedText.replace(/```json\n?|\n?```/g, '').trim();
          if (cleanJson && cleanJson.length > 0) {
              const leads = JSON.parse(cleanJson);
              setGeneratedLeads(leads);
-             if (onLeadsGenerated && leads.length > 0) onLeadsGenerated(leads.length);
+             leadsCount = leads.length;
          }
       } catch (parseError) {
          console.warn("JSON Parse Error on stream result, attempting regex extraction...", parseError);
@@ -133,9 +135,18 @@ const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ onLeadsGenerated, lang })
              try {
                 const leads = JSON.parse(match[0]);
                 setGeneratedLeads(leads);
-                if (onLeadsGenerated && leads.length > 0) onLeadsGenerated(leads.length);
+                leadsCount = leads.length;
              } catch (e) { console.error("Fallback parsing failed", e); }
          }
+      }
+      
+      if (leadsCount > 0 && onLeadsGenerated) {
+        onLeadsGenerated(leadsCount);
+        // Sync stats to Supabase if logged in (Fire and forget)
+        incrementUserStats(leadsCount, 1);
+      } else {
+        // Just increment query count
+        incrementUserStats(0, 1);
       }
       
       setProcessingProgress(100);

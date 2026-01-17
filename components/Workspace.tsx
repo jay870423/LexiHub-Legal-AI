@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { PersonalDoc, Language } from '../types';
 import { generateDocumentAnalysis } from '../services/geminiService';
+import { supabase, createDocument, updateDocument, deleteDocument } from '../services/supabase';
 import { getTranslation } from '../utils/i18n';
-import { Plus, FileText, Trash2, Edit2, Save, X, Search, FileBarChart, Calendar, Tag, Upload, AlertCircle, Zap, Shield, CheckCircle2, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Plus, FileText, Trash2, Edit2, Save, X, Search, FileBarChart, Calendar, Tag, Upload, AlertCircle, Zap, Shield, CheckCircle2, AlertTriangle, ArrowLeft, Loader2, Cloud } from 'lucide-react';
 
 interface WorkspaceProps {
   documents: PersonalDoc[];
@@ -15,8 +16,10 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
   const [isEditing, setIsEditing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Analysis State
+  // Loading States
+  const [isSaving, setIsSaving] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [user, setUser] = useState<any>(null);
   
   // File Input Ref
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,21 +32,49 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
 
   const t = getTranslation(lang);
 
-  // Helper for unique ID
-  const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  // Check auth state on mount
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      // NOTE: Data loading is now handled in App.tsx
+    });
+  }, []);
 
-  const handleCreateNew = () => {
-    const newDoc: PersonalDoc = {
-      id: generateId(),
+  // Helper for unique ID (Local only)
+  const generateLocalId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  const handleCreateNew = async () => {
+    const newDocBase = {
       title: 'Untitled Document',
-      category: 'Report',
+      category: 'Report' as const,
       content: '',
       tags: [],
-      updatedAt: new Date().toISOString()
     };
-    setDocuments(prev => [newDoc, ...prev]);
-    handleSelectDoc(newDoc);
-    setIsEditing(true);
+
+    if (user) {
+      // Supabase
+      setIsSaving(true);
+      try {
+        const created = await createDocument(newDocBase);
+        setDocuments(prev => [created, ...prev]);
+        handleSelectDoc(created);
+        setIsEditing(true);
+      } catch (e) {
+        alert("Failed to create document on server.");
+      } finally {
+        setIsSaving(false);
+      }
+    } else {
+      // Local Storage
+      const newDoc: PersonalDoc = {
+        id: generateLocalId(),
+        updatedAt: new Date().toISOString(),
+        ...newDocBase
+      };
+      setDocuments(prev => [newDoc, ...prev]);
+      handleSelectDoc(newDoc);
+      setIsEditing(true);
+    }
   };
 
   const handleSelectDoc = (doc: PersonalDoc) => {
@@ -60,36 +91,65 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
     setIsEditing(false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selectedDocId) return;
     
-    setDocuments(prev => prev.map(doc => {
-      if (doc.id === selectedDocId) {
-        return {
-          ...doc,
-          title: editTitle,
-          content: editContent,
-          category: editCategory,
-          tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
-          updatedAt: new Date().toISOString()
-        };
+    const tagsArray = editTags.split(',').map(t => t.trim()).filter(Boolean);
+    const updates = {
+      title: editTitle,
+      content: editContent,
+      category: editCategory,
+      tags: tagsArray,
+      updatedAt: new Date().toISOString() // Local optimistic update
+    };
+
+    if (user) {
+      setIsSaving(true);
+      try {
+        // Sync with DB
+        const updatedDoc = await updateDocument(selectedDocId, updates);
+        
+        // Update Local State with Server Response (contains correct timestamp)
+        setDocuments(prev => prev.map(doc => doc.id === selectedDocId ? updatedDoc : doc));
+      } catch (e) {
+        alert("Failed to save changes to server.");
+        return; // Don't exit edit mode on failure
+      } finally {
+        setIsSaving(false);
       }
-      return doc;
-    }));
+    } else {
+      // Local Only
+      setDocuments(prev => prev.map(doc => {
+        if (doc.id === selectedDocId) {
+          return { ...doc, ...updates };
+        }
+        return doc;
+      }));
+    }
+    
     setIsEditing(false);
   };
 
   // Robust Delete Handler
-  const handleDelete = (e: React.MouseEvent, id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
     // Prevent event from bubbling up to the row click handler
     e.stopPropagation();
     e.preventDefault();
     
     if (window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
-        // 1. Remove from list immediately
+        if (user) {
+           try {
+             await deleteDocument(id);
+           } catch (e) {
+             alert("Failed to delete document from server.");
+             return;
+           }
+        }
+
+        // Remove from UI
         setDocuments(prev => prev.filter(d => d.id !== id));
 
-        // 2. If the deleted document was selected, clear selection
+        // If the deleted document was selected, clear selection
         if (selectedDocId === id) {
             setSelectedDocId(null);
             setIsEditing(false);
@@ -109,7 +169,11 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
     try {
         const analysis = await generateDocumentAnalysis(selectedDoc.title, selectedDoc.content, selectedDoc.category, lang);
         
-        // Save analysis to document
+        if (user) {
+           await updateDocument(selectedDocId, { aiAnalysis: analysis });
+        }
+
+        // Save analysis to document state (Optimistic)
         setDocuments(prev => prev.map(doc => {
             if (doc.id === selectedDocId) {
                 return { ...doc, aiAnalysis: analysis };
@@ -165,9 +229,6 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
             const arrayBuffer = await file.arrayBuffer();
             const result = await mammoth.extractRawText({ arrayBuffer });
             textContent = result.value;
-            if (result.messages.length > 0) {
-                console.log("Mammoth messages:", result.messages);
-            }
 
         } else if (['xlsx', 'xls'].includes(fileType)) {
             // Excel Parsing
@@ -201,16 +262,34 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
     }
 
     if (textContent) {
-        const newDoc: PersonalDoc = {
-          id: generateId(),
+        const newDocBase = {
           title: file.name.replace(/\.[^/.]+$/, ""), // Remove extension
-          category: ['xlsx', 'xls', 'csv'].includes(fileType || '') ? 'Data' : 'Report',
+          category: (['xlsx', 'xls', 'csv'].includes(fileType || '') ? 'Data' : 'Report') as any,
           content: textContent,
           tags: ['Imported', (fileType || 'file').toUpperCase()],
-          updatedAt: new Date().toISOString()
         };
-        setDocuments(prev => [newDoc, ...prev]);
-        handleSelectDoc(newDoc);
+
+        if (user) {
+            setIsSaving(true);
+            try {
+                const created = await createDocument(newDocBase);
+                setDocuments(prev => [created, ...prev]);
+                handleSelectDoc(created);
+            } catch (e) {
+                alert("Failed to import to server");
+            } finally {
+                setIsSaving(false);
+            }
+        } else {
+             const newDoc: PersonalDoc = {
+                id: generateLocalId(),
+                updatedAt: new Date().toISOString(),
+                ...newDocBase
+             };
+             setDocuments(prev => [newDoc, ...prev]);
+             handleSelectDoc(newDoc);
+        }
+        
         alert(`Successfully imported "${file.name}"`);
     }
 
@@ -253,12 +332,14 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
           <div className="flex gap-2">
             <button 
               onClick={handleCreateNew}
+              disabled={isSaving}
               className="flex-1 bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors shadow-sm text-sm"
             >
-              <Plus size={16} /> {t.workspace.newDoc}
+              {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />} {t.workspace.newDoc}
             </button>
             <button 
               onClick={triggerFileUpload}
+              disabled={isSaving}
               className="px-4 bg-white border border-gray-300 hover:bg-gray-50 text-slate-700 py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors shadow-sm text-sm"
               title="Import PDF, Word, Excel, TXT..."
             >
@@ -276,6 +357,13 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
               className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
+          
+          {user && (
+            <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+               <Cloud size={12} />
+               <span>Cloud Sync Active</span>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-2">
@@ -372,8 +460,9 @@ const Workspace: React.FC<WorkspaceProps> = ({ documents, setDocuments, lang }) 
                       <button onClick={() => setIsEditing(false)} className="p-2 text-slate-500 hover:bg-slate-50 rounded-lg">
                         <X size={20} />
                       </button>
-                      <button onClick={handleSave} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm">
-                        <Save size={16} className="md:mr-1" /> <span className="hidden md:inline">{t.workspace.save}</span>
+                      <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50">
+                        {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16} className="md:mr-1" />} 
+                        <span className="hidden md:inline">{t.workspace.save}</span>
                       </button>
                     </>
                  ) : (
