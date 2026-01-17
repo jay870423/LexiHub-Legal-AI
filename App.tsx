@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ViewState, AIProvider, PersonalDoc, Language } from './types';
 import { INITIAL_ARTICLES } from './constants';
@@ -6,6 +7,7 @@ import KnowledgeBase from './components/KnowledgeBase';
 import ChatInterface from './components/ChatInterface';
 import Workspace from './components/Workspace';
 import Settings from './components/Settings';
+import UserManual from './components/UserManual';
 import AuthModal from './components/AuthModal';
 import { getGlobalProvider } from './services/geminiService';
 import { supabase, signOut, fetchUserStats, fetchDocuments } from './services/supabase';
@@ -240,6 +242,7 @@ const App: React.FC = () => {
               {currentView === 'knowledge' && t.header.discoveryTitle}
               {currentView === 'workspace' && t.header.workspaceTitle}
               {currentView === 'chat' && t.header.chatTitle}
+              {currentView === 'manual' && t.header.manualTitle}
               {currentView === 'settings' && t.header.settingsTitle}
             </h1>
             <p className="text-sm md:text-base text-slate-500 mt-1 line-clamp-2 md:line-clamp-none">
@@ -247,6 +250,7 @@ const App: React.FC = () => {
               {currentView === 'knowledge' && t.header.discoveryDesc}
               {currentView === 'workspace' && t.header.workspaceDesc}
               {currentView === 'chat' && t.header.chatDesc}
+              {currentView === 'manual' && t.header.manualDesc}
               {currentView === 'settings' && t.header.settingsDesc}
             </p>
           </header>
@@ -284,6 +288,10 @@ const App: React.FC = () => {
                 personalDocs={personalDocs}
                 lang={lang}
               />
+            )}
+
+            {currentView === 'manual' && (
+              <UserManual lang={lang} />
             )}
 
             {currentView === 'settings' && (

@@ -1,3 +1,4 @@
+
 import { Language } from "../types";
 
 // Define the translation dictionary ensuring keys match component usage exactly
@@ -9,6 +10,7 @@ export const TRANSLATIONS = {
       workspace: 'My Workspace',
       assistant: 'AI Assistant',
       settings: 'Settings',
+      manual: 'User Manual',
       status: 'Status',
       provider: 'Provider',
       online: 'Online',
@@ -35,6 +37,8 @@ export const TRANSLATIONS = {
       chatDesc: 'Interactive assistant capable of analyzing your personal documents.',
       settingsTitle: 'System Settings',
       settingsDesc: 'Configure AI providers and system preferences.',
+      manualTitle: 'User Operation Manual',
+      manualDesc: 'Comprehensive guide to using LexiHub effectively.',
     },
     dashboard: {
       totalLeads: 'Total Leads Discovered',
@@ -133,6 +137,7 @@ export const TRANSLATIONS = {
       workspace: '我的工作台',
       assistant: 'AI 助手',
       settings: '设置',
+      manual: '操作手册',
       status: '状态',
       provider: '模型提供商',
       online: '在线',
@@ -159,6 +164,8 @@ export const TRANSLATIONS = {
       chatDesc: '能够分析您个人文档的交互式法律助手。',
       settingsTitle: '系统设置',
       settingsDesc: '配置 AI 模型提供商与系统偏好。',
+      manualTitle: '用户操作手册',
+      manualDesc: '全面了解如何高效使用 LexiHub。',
     },
     dashboard: {
       totalLeads: '已挖掘线索总数',

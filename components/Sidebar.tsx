@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { LayoutDashboard, MessageSquareText, Settings, Scale, Telescope, FolderKanban, X, Globe, LogIn, LogOut, User } from 'lucide-react';
+import { LayoutDashboard, MessageSquareText, Settings, Scale, Telescope, FolderKanban, X, LogIn, LogOut, User, BookOpen } from 'lucide-react';
 import { ViewState, AIProvider, Language } from '../types';
 import { getTranslation } from '../utils/i18n';
 import { User as SupabaseUser } from '@supabase/supabase-js';
@@ -25,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, currentProvider
     { id: 'knowledge', label: t.nav.discovery, icon: <Telescope size={20} /> },
     { id: 'workspace', label: t.nav.workspace, icon: <FolderKanban size={20} /> },
     { id: 'chat', label: t.nav.assistant, icon: <MessageSquareText size={20} /> },
+    { id: 'manual', label: t.nav.manual, icon: <BookOpen size={20} /> },
     { id: 'settings', label: t.nav.settings, icon: <Settings size={20} /> },
   ];
 

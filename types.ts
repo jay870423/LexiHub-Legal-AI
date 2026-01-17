@@ -72,7 +72,7 @@ export interface Message {
   searchResults?: Array<{ title: string; uri: string }>; // For Google Search results
 }
 
-export type ViewState = 'dashboard' | 'knowledge' | 'workspace' | 'chat' | 'settings';
+export type ViewState = 'dashboard' | 'knowledge' | 'workspace' | 'chat' | 'settings' | 'manual';
 
 export type AIProvider = 'gemini' | 'deepseek';
 
