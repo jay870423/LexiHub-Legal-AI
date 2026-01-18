@@ -217,9 +217,9 @@ const App: React.FC = () => {
       />
       
       {/* Main Content Area - Responsive Margins */}
-      <main className="flex-1 transition-all duration-300 md:ml-64 ml-0 w-full">
+      <main className="flex-1 transition-all duration-300 md:ml-64 ml-0 w-full flex flex-col min-h-screen">
         {/* Mobile Header Bar */}
-        <div className="md:hidden bg-white border-b border-gray-200 p-4 sticky top-0 z-20 flex items-center justify-between shadow-sm">
+        <div className="md:hidden bg-white border-b border-gray-200 p-4 sticky top-0 z-20 flex items-center justify-between shadow-sm flex-shrink-0">
            <div className="flex items-center gap-3">
              <button 
                onClick={() => setIsSidebarOpen(true)}
@@ -234,7 +234,7 @@ const App: React.FC = () => {
            </div>
         </div>
 
-        <div className="p-4 md:p-8 max-w-7xl mx-auto">
+        <div className="p-4 md:p-8 max-w-7xl mx-auto flex-1 w-full">
           {/* Desktop Header / Page Title */}
           <header className="mb-6 md:mb-8">
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
@@ -303,6 +303,11 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Footer */}
+        <footer className="py-6 text-center text-xs text-slate-400 border-t border-gray-100 bg-gray-50/50 mt-auto">
+          {t.footer?.copyright}
+        </footer>
       </main>
     </div>
   );

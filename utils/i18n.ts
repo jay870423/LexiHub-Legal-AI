@@ -128,6 +128,9 @@ export const TRANSLATIONS = {
       saveConfig: 'Save Configuration',
       saving: 'Saving...',
       saved: 'Saved'
+    },
+    footer: {
+      copyright: "© 2026 Hainan Zhouyuan Information Technology Co., Ltd. All rights reserved."
     }
   },
   zh: {
@@ -255,6 +258,9 @@ export const TRANSLATIONS = {
       saveConfig: '保存配置',
       saving: '保存中...',
       saved: '已保存'
+    },
+    footer: {
+      copyright: "版权所有 海南宙元信息技术有限公司 © 2026"
     }
   }
 };
